@@ -8,6 +8,18 @@ from pathlib import Path
 import autosync_core as core
 
 
+def resource_dir():
+    """Base dir to find bundled resources (VERSION, assets/) — the PyInstaller
+    onefile extraction dir when frozen, or this file's folder when run from source."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
+def asset_path(*parts):
+    return resource_dir().joinpath(*parts)
+
+
 def self_paths():
     if getattr(sys, "frozen", False):
         base = Path(sys.executable).parent
@@ -105,6 +117,32 @@ def cmd_push_now(args):
     for path, r in status["repos"].items():
         tag = "[OK]" if r.get("success") else "[ERRO]"
         print(f"{tag} {path}: {r.get('message', '')}")
+
+
+def _resolve_repo_arg(repo_arg):
+    """--repo <caminho>, ou o diretorio atual se omitido."""
+    return str(Path(repo_arg).resolve()) if repo_arg else str(Path.cwd())
+
+
+def cmd_commit(args):
+    path = _resolve_repo_arg(args.repo)
+    r = core.commit_repo(path)
+    tag = "[OK]" if r["success"] else "[ERRO]"
+    print(f"{tag} {path}: {r['message']}")
+
+
+def cmd_push(args):
+    path = _resolve_repo_arg(args.repo)
+    r = core.push_repo(path)
+    tag = "[OK]" if r["success"] else "[ERRO]"
+    print(f"{tag} {path}: {r['message']}")
+
+
+def cmd_sync(args):
+    path = _resolve_repo_arg(args.repo)
+    r = core.sync_repo(path)
+    tag = "[OK]" if r["success"] else "[ERRO]"
+    print(f"{tag} {path}: {r['message']}")
 
 
 SINCE_PRESETS = {"7d": 7, "30d": 30, "90d": 90}
@@ -285,8 +323,7 @@ def run_tray():
 # ---------------- entry point ----------------
 
 def get_version():
-    base = Path(sys._MEIPASS) if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS") else Path(__file__).resolve().parent
-    version_file = base / "VERSION"
+    version_file = asset_path("VERSION")
     if version_file.exists():
         return version_file.read_text(encoding="utf-8").strip()
     return "desconhecida"
@@ -327,6 +364,18 @@ def build_parser():
 
     p = sub.add_parser("push-now", help="so push do que ja foi commitado")
     p.set_defaults(func=cmd_push_now)
+
+    p = sub.add_parser("commit", help="commita so um repo (o atual, ou --repo), sem push")
+    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p.set_defaults(func=cmd_commit)
+
+    p = sub.add_parser("push", help="da push num repo (o atual, ou --repo)")
+    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p.set_defaults(func=cmd_push)
+
+    p = sub.add_parser("sync", help="commit + push num repo (o atual, ou --repo)")
+    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("history")
     p.add_argument("--repo", help="caminho de um repo especifico (default: todos os alvos configurados)")
