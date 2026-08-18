@@ -153,6 +153,27 @@ def _print_batch_result(status):
         print(f"{tag} {path}: {r.get('message', '')}")
 
 
+def cmd_preview(args):
+    """So gera a mensagem (sem commitar nada) e mostra - pensado pra quem
+    chama via skill/chat (sem terminal interativo pro --review): mostra
+    aqui, deixa o usuario ajustar na conversa, depois confirma com
+    `commit -m "..."` / `sync -m "..."`. Nao deixa nada staged (sempre
+    desfaz - preview e so leitura)."""
+    path = _resolve_repo_arg(args.repo)
+    staged = core.stage_and_generate_message(path)
+    core.unstage(path)
+    if staged["error"]:
+        print(f"[ERRO] {path}: {staged['error']}")
+        return
+    if not staged["hadChanges"]:
+        print(f"[OK] {path}: sem alteracoes pendentes")
+        return
+    if args.json:
+        print(json.dumps({"path": path, "message": staged["message"]}, ensure_ascii=False))
+    else:
+        print(staged["message"])
+
+
 def _review_message_prompt(repo_path, generated):
     """Mostra a mensagem gerada e deixa usar/editar/cancelar. Retorna a
     mensagem final, ou None se cancelado (inclusive se o input acabar sem
@@ -502,6 +523,11 @@ def build_parser():
                    help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar e enviar "
                         "(terminal interativo; nao pode ser usado com --all/--message)")
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("preview", help="gera a mensagem do commit e mostra, sem commitar nada (repo atual por padrao)")
+    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_preview)
 
     p = sub.add_parser("history")
     p.add_argument("--repo", help="caminho de um repo especifico (default: todos os alvos configurados)")
