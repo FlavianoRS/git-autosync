@@ -90,7 +90,10 @@ def run_bg(fn, on_done, root):
             result = fn()
         except Exception as exc:
             result = exc
-        root.after(0, lambda: on_done(result))
+        try:
+            root.after(0, lambda: on_done(result))
+        except RuntimeError:
+            pass  # janela ja foi fechada antes do resultado voltar
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -302,8 +305,9 @@ class CommitListPanel(ctk.CTkFrame):
 class RepoCard(ctk.CTkFrame):
     """One repository: header (badge/last push/actions) + collapsible commit list."""
 
-    def __init__(self, master, entry, root, on_changed, history_mode=False):
-        super().__init__(master, corner_radius=10, fg_color=("gray95", "gray20"))
+    def __init__(self, master, entry, root, on_changed, history_mode=False, compact=False):
+        self.compact = compact
+        super().__init__(master, corner_radius=6 if compact else 10, fg_color=("gray95", "gray20"))
         self.entry = entry
         self.path = entry["path"]
         self.manageable = entry["sourceType"] == "repo"
@@ -315,47 +319,66 @@ class RepoCard(ctk.CTkFrame):
         self.since_preset = "all"
 
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=12, pady=(10, 4))
+        header.pack(fill="x", padx=10 if compact else 12, pady=(6, 2) if compact else (10, 4))
 
         name = self.path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
         title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left", fill="x", expand=True)
-        ctk.CTkLabel(title_box, text=name, font=ctk.CTkFont(weight="bold")).pack(anchor="w")
-        ctk.CTkLabel(title_box, text=self.path, text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w")
-        if not self.manageable:
-            ctk.CTkLabel(title_box, text=f"via pasta: {self.source_path}", text_color="gray",
-                         font=ctk.CTkFont(size=11, slant="italic")).pack(anchor="w")
+        if compact:
+            title_row = ctk.CTkFrame(title_box, fg_color="transparent")
+            title_row.pack(anchor="w", fill="x")
+            ctk.CTkLabel(title_row, text=name, font=ctk.CTkFont(weight="bold", size=12), width=200,
+                         anchor="w").pack(side="left")
+            if not self.manageable:
+                ctk.CTkLabel(title_row, text="(via pasta)", text_color="gray",
+                             font=ctk.CTkFont(size=10, slant="italic")).pack(side="left", padx=(6, 0))
+        else:
+            ctk.CTkLabel(title_box, text=name, font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+            ctk.CTkLabel(title_box, text=self.path, text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w")
+            if not self.manageable:
+                ctk.CTkLabel(title_box, text=f"via pasta: {self.source_path}", text_color="gray",
+                             font=ctk.CTkFont(size=11, slant="italic")).pack(anchor="w")
 
+        badge_width = 100 if compact else 140
         self.pending_badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
-                                           text_color="white", padx=10, width=140)
-        self.pending_badge.pack(side="left", padx=8)
+                                           text_color="white", padx=8 if compact else 10, width=badge_width)
+        self.pending_badge.pack(side="left", padx=(4 if compact else 8))
 
         self.badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
-                                   text_color="white", padx=10, width=90)
-        self.badge.pack(side="left", padx=8)
+                                   text_color="white", padx=8 if compact else 10, width=70 if compact else 90)
+        self.badge.pack(side="left", padx=(4 if compact else 8))
 
-        self.last_push_lbl = ctk.CTkLabel(header, text="ultimo push: ...", text_color="gray", font=ctk.CTkFont(size=11))
-        self.last_push_lbl.pack(side="left", padx=8)
+        if not compact:
+            self.last_push_lbl = ctk.CTkLabel(header, text="ultimo push: ...", text_color="gray",
+                                               font=ctk.CTkFont(size=11))
+            self.last_push_lbl.pack(side="left", padx=8)
+        else:
+            self.last_push_lbl = ctk.CTkLabel(header, text="", text_color="gray", font=ctk.CTkFont(size=10))
+            self.last_push_lbl.pack(side="left", padx=4)
 
-        actions = ctk.CTkFrame(self, fg_color="transparent")
-        actions.pack(fill="x", padx=12, pady=(0, 4))
+        # em modo lista, os botoes ficam na mesma linha (header); em modo card, numa linha propria abaixo
+        actions = header if compact else ctk.CTkFrame(self, fg_color="transparent")
+        if not compact:
+            actions.pack(fill="x", padx=12, pady=(0, 4))
+
+        btn_w = 66 if compact else None
 
         if not history_mode:
-            ctk.CTkButton(actions, text="Commitar", width=90, command=self._commit).pack(side="left", padx=(0, 6))
-            ctk.CTkButton(actions, text="Push", width=70, command=self._push).pack(side="left", padx=(0, 6))
-            ctk.CTkButton(actions, text="Sincronizar", width=100, command=self._sync).pack(side="left", padx=(0, 6))
+            ctk.CTkButton(actions, text="Commitar", width=btn_w or 90, command=self._commit).pack(side="left", padx=(0, 4 if compact else 6))
+            ctk.CTkButton(actions, text="Push", width=btn_w or 70, command=self._push).pack(side="left", padx=(0, 4 if compact else 6))
+            ctk.CTkButton(actions, text="Sincronizar", width=btn_w or 100, command=self._sync).pack(side="left", padx=(0, 4 if compact else 6))
             if self.manageable:
                 enabled = entry.get("enabled", True)
-                self.toggle_btn = ctk.CTkButton(actions, text="Desativar" if enabled else "Ativar", width=90,
+                self.toggle_btn = ctk.CTkButton(actions, text="Desativar" if enabled else "Ativar", width=btn_w or 90,
                                                  fg_color="gray50", command=self._toggle_enabled)
-                self.toggle_btn.pack(side="left", padx=(0, 6))
-                ctk.CTkButton(actions, text="Remover", width=80, fg_color="#8a2c2c", hover_color="#6f2323",
-                              command=self._remove).pack(side="left", padx=(0, 6))
+                self.toggle_btn.pack(side="left", padx=(0, 4 if compact else 6))
+                ctk.CTkButton(actions, text="Remover", width=btn_w or 80, fg_color="#8a2c2c", hover_color="#6f2323",
+                              command=self._remove).pack(side="left", padx=(0, 4 if compact else 6))
             else:
-                ctk.CTkButton(actions, text="Ignorar", width=80, fg_color="#8a2c2c",
-                              hover_color="#6f2323", command=self._exclude_from_root).pack(side="left", padx=(0, 6))
+                ctk.CTkButton(actions, text="Ignorar", width=btn_w or 80, fg_color="#8a2c2c",
+                              hover_color="#6f2323", command=self._exclude_from_root).pack(side="left", padx=(0, 4 if compact else 6))
 
-        self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=120, fg_color="transparent",
+        self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=btn_w or 120, fg_color="transparent",
                                          text_color=("gray20", "gray80"), hover_color=("gray85", "gray30"),
                                          command=self._toggle_expand)
         self.expand_btn.pack(side="left")
@@ -366,9 +389,10 @@ class RepoCard(ctk.CTkFrame):
     # ---- data ----
 
     def refresh(self):
+        prefix = "" if self.compact else "ultimo push: "
         self.pending_badge.configure(text="...", fg_color="gray40")
         self.badge.configure(text="...", fg_color="gray40")
-        self.last_push_lbl.configure(text="ultimo push: ...")
+        self.last_push_lbl.configure(text=f"{prefix}...")
 
         def load():
             status = core.load_status()
@@ -383,7 +407,7 @@ class RepoCard(ctk.CTkFrame):
                 self.badge.configure(text="erro", fg_color="#8a2c2c")
                 return
             entry, unpushed, pending = result
-            self.last_push_lbl.configure(text=f"ultimo push: {human_relative(entry.get('lastPush'))}")
+            self.last_push_lbl.configure(text=f"{prefix}{human_relative(entry.get('lastPush'))}")
 
             if pending:
                 self.pending_badge.configure(text="alteracao pendente", fg_color="#a67c1a")
@@ -482,9 +506,15 @@ class RepoCard(ctk.CTkFrame):
         self.on_changed()
 
 
+THEME_OPTIONS = [("Sistema", "system"), ("Claro", "light"), ("Escuro", "dark")]
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        cfg = core.load_config()
+        ctk.set_appearance_mode(cfg.get("theme", "system"))
+        self.view_mode = cfg.get("viewMode", "card")
         self.title(f"Git AutoSync {app_module.get_version()}")
         self.geometry("1020x640")
         self.minsize(820, 520)
@@ -521,7 +551,17 @@ class App(ctk.CTk):
         self._add_nav_button("Log", self.show_log)
 
         ctk.CTkLabel(sidebar, text=f"v{app_module.get_version()}", text_color="gray", font=ctk.CTkFont(size=11)).pack(
-            side="bottom", pady=12)
+            side="bottom", pady=(0, 12))
+
+        theme_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        theme_frame.pack(side="bottom", fill="x", padx=14, pady=(0, 4))
+        ctk.CTkLabel(theme_frame, text="Tema:", font=ctk.CTkFont(size=11), text_color="gray").pack(anchor="w")
+        current_theme = core.load_config().get("theme", "system")
+        theme_label = next((l for l, v in THEME_OPTIONS if v == current_theme), "Sistema")
+        theme_menu = ctk.CTkOptionMenu(theme_frame, values=[l for l, v in THEME_OPTIONS], width=170,
+                                        command=self._on_theme_change)
+        theme_menu.set(theme_label)
+        theme_menu.pack(anchor="w", pady=(2, 0))
 
     def _add_nav_button(self, label, command):
         key = label.lower()
@@ -540,6 +580,13 @@ class App(ctk.CTk):
     def _highlight_nav(self, key):
         for k, btn in self.nav_buttons.items():
             btn.configure(fg_color=("gray75", "gray28") if k == key else "transparent")
+
+    def _on_theme_change(self, label):
+        value = next(v for l, v in THEME_OPTIONS if l == label)
+        ctk.set_appearance_mode(value)
+        cfg = core.load_config()
+        cfg["theme"] = value
+        core.save_config(cfg)
 
     def _clear_content(self):
         for w in self.content.winfo_children():
@@ -566,6 +613,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(toolbar, text="Status dos repositorios", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         btns = ctk.CTkFrame(toolbar, fg_color="transparent")
         btns.pack(side="right")
+        self._add_view_mode_toggle(btns, self.show_status)
         ctk.CTkButton(btns, text="Commitar tudo", command=self._commit_all).pack(side="left", padx=4)
         ctk.CTkButton(btns, text="Push tudo", command=self._push_all).pack(side="left", padx=4)
         ctk.CTkButton(btns, text="Sincronizar tudo", command=self._sync_all).pack(side="left", padx=4)
@@ -581,9 +629,24 @@ class App(ctk.CTk):
                          text_color="gray").pack(pady=20)
             return
 
+        compact = self.view_mode == "list"
         for e in entries:
-            card = RepoCard(scroll, e, self, on_changed=self.show_status)
-            card.pack(fill="x", pady=6)
+            card = RepoCard(scroll, e, self, on_changed=self.show_status, compact=compact)
+            card.pack(fill="x", pady=3 if compact else 6)
+
+    def _add_view_mode_toggle(self, parent, refresh_command):
+        """Botao Lista/Card - troca self.view_mode, salva no config e
+        reconstroi a view atual."""
+        label = "▤ Lista" if self.view_mode == "card" else "▦ Cards"
+
+        def toggle():
+            self.view_mode = "list" if self.view_mode == "card" else "card"
+            cfg = core.load_config()
+            cfg["viewMode"] = self.view_mode
+            core.save_config(cfg)
+            refresh_command()
+
+        ctk.CTkButton(parent, text=label, width=90, fg_color="gray40", command=toggle).pack(side="left", padx=4)
 
     def _commit_all(self):
         self._run_global_action(core.commit_all, "Commit em lote concluido.")
@@ -627,6 +690,7 @@ class App(ctk.CTk):
 
         ctk.CTkOptionMenu(header, values=[l for l, _ in HISTORY_PRESETS], variable=period_var,
                           command=on_period_change, width=120).pack(side="right")
+        self._add_view_mode_toggle(header, self.show_history)
 
         cfg = core.load_config()
         entries = core.resolve_targets_detailed(cfg.get("targets", []), skip_disabled=False)
@@ -637,9 +701,10 @@ class App(ctk.CTk):
             ctk.CTkLabel(scroll, text="Nenhum repositorio configurado ainda.", text_color="gray").pack(pady=20)
             return
 
+        compact = self.view_mode == "list"
         for e in entries:
-            card = RepoCard(scroll, e, self, on_changed=self.show_history, history_mode=True)
-            card.pack(fill="x", pady=6)
+            card = RepoCard(scroll, e, self, on_changed=self.show_history, history_mode=True, compact=compact)
+            card.pack(fill="x", pady=3 if compact else 6)
             cards.append(card)
 
     # ---- Agendamento view (config/monitoramento, sem commit/push manual) ----
