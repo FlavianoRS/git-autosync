@@ -1,0 +1,19 @@
+# estado/runtime (gerado em execucao, nao versionar)
+legacy/status.json
+legacy/autosync.log
+*.log
+
+# python
+__pycache__/
+*.pyc
+python/build/
+python/dist/
+*.spec.bak
+
+# ambientes virtuais
+.venv/
+venv/
+
+# editor
+.vscode/
+.idea/

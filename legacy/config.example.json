@@ -1,0 +1,16 @@
+﻿{
+    "logFile":  "autosync.log",
+    "statusFile":  "status.json",
+    "schedules":  [
+                      "17:30"
+                  ],
+    "targets":  [
+                    {
+                        "path":  "C:\\Users\\SEU_USUARIO\\Documents\\Demandas",
+                        "type":  "root",
+                        "enabled":  true
+                    }
+                ],
+    "taskName":  "GitAutoSyncDemandas",
+    "trayEnabled":  false
+}
