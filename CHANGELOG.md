@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.3.0
+
+- **Fix**: icone da janela sumia da barra de tarefas depois de abrir (bug
+  conhecido do customtkinter, que reseta o icone apos redesenhar o tema) —
+  agora reaplica de novo em alguns momentos seguidos e usa
+  `iconbitmap(default=...)`, mais robusto pro Windows.
+- **Verificacao de push antes de commitar**: `sync_repo`/`run_all` (usados
+  pela tarefa agendada, `run-now` e o novo comando `sync`) checam se o
+  remoto esta acessivel ANTES de gerar o commit.
+  - **Rodada agendada** (sem ninguem pra responder): tenta de novo sozinha
+    algumas vezes e, se continuar sem acesso, segue so commitando — nunca
+    trava esperando resposta.
+  - **CLI** (`run-now`, `sync`, com terminal interativo): pergunta direto no
+    terminal, `[T] tentar novamente` / `[C] apenas commit`.
+  - **GUI**: novo botao "Sincronizar" (por repositorio e "Sincronizar tudo"
+    no topo da aba Status) — mostra um popup com os mesmos dois botoes.
+  - Corrigido de brinde: no Windows, o `timeout` do `subprocess` nao
+    derrubava de fato um `git` tentando alcancar um remoto sem resposta
+    (ficava pendurado ~20s+ mesmo pedindo poucos segundos, por causa de um
+    processo auxiliar de rede que herdava os pipes) — agora mata a arvore de
+    processos inteira quando o tempo esgota.
+- **Icone da bandeja** reaproveita o mesmo desenho do icone do projeto
+  (circulo + duas flechas de sync), so trocando a cor pelo status, em vez de
+  uma bolinha lisa sem relacao visual com o resto do app.
+
 ## 3.2.0
 
 - **Ponto de entrada único**: `instalar.bat` (Windows) / `instalar.sh`

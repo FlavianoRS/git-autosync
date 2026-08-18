@@ -19,22 +19,38 @@ ctk.set_default_color_theme("blue")
 _icon_photo = None  # mantem referencia viva (Tk descarta PhotoImage sem dono)
 
 
-def _set_window_icon(win):
+def _apply_window_icon_once(win):
     global _icon_photo
-    try:
-        if core.IS_WINDOWS:
-            ico = app_module.asset_path("assets", "icon.ico")
-            if ico.exists():
-                win.iconbitmap(str(ico))
-        else:
-            png = app_module.asset_path("assets", "icon.png")
-            if png.exists():
-                from PIL import Image, ImageTk
-                if _icon_photo is None:
-                    _icon_photo = ImageTk.PhotoImage(Image.open(png))
-                win.iconphoto(True, _icon_photo)
-    except Exception:
-        pass
+    if core.IS_WINDOWS:
+        ico = app_module.asset_path("assets", "icon.ico")
+        if ico.exists():
+            win.iconbitmap(default=str(ico))
+    png = app_module.asset_path("assets", "icon.png")
+    if png.exists():
+        from PIL import Image, ImageTk
+        if _icon_photo is None:
+            _icon_photo = ImageTk.PhotoImage(Image.open(png))
+        win.iconphoto(True, _icon_photo)
+
+
+def _set_window_icon(win):
+    """customtkinter reseta o icone da janela pra o padrao (arquivo .py/feather)
+    depois que ela termina de se redesenhar/aplicar o tema — reaplicar so uma
+    vez no __init__ nao e suficiente. Reaplica de novo em alguns momentos
+    seguintes pra garantir que o icone final (barra de tarefas/alt-tab) fique
+    o nosso, nao o do interpretador Python."""
+    def apply():
+        try:
+            _apply_window_icon_once(win)
+        except Exception:
+            pass
+
+    apply()
+    for delay in (150, 400, 900):
+        try:
+            win.after(delay, apply)
+        except Exception:
+            pass
 
 SIDEBAR_WIDTH = 210
 HISTORY_PRESETS = [("7 dias", "7d"), ("30 dias", "30d"), ("90 dias", "90d"), ("Tudo", "all")]
@@ -77,6 +93,59 @@ def run_bg(fn, on_done, root):
         root.after(0, lambda: on_done(result))
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+class PushUnavailableDialog(ctk.CTkToplevel):
+    """Popup mostrado (na thread principal) quando o remoto de um repo esta
+    inacessivel bem antes de comitar. Bloqueia so a thread de background que
+    esta rodando o sync — a janela principal continua responsiva."""
+
+    def __init__(self, master, repo_path, on_choice):
+        super().__init__(master)
+        self.title("Push indisponivel")
+        self.geometry("480x200")
+        self.resizable(False, False)
+        _set_window_icon(self)
+        self.on_choice = on_choice
+        self.protocol("WM_DELETE_WINDOW", lambda: self._choose(False))
+
+        ctk.CTkLabel(self, text="Nao foi possivel acessar o remoto agora:",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=16, pady=(20, 4))
+        ctk.CTkLabel(self, text=repo_path, text_color="gray", wraplength=440, justify="left").pack(
+            anchor="w", padx=16, pady=(0, 16))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=8)
+        ctk.CTkButton(row, text="Tentar novamente", width=160,
+                      command=lambda: self._choose(True)).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Apenas commit", width=160, fg_color="gray40",
+                      command=lambda: self._choose(False)).pack(side="left", padx=6)
+
+        self.grab_set()
+
+    def _choose(self, retry):
+        self.on_choice(retry)
+        self.destroy()
+
+
+def make_gui_push_decider(root):
+    """Fabrica um push_decider (ver core.sync_repo) que, quando chamado numa
+    thread de background, pede pro thread principal abrir o
+    PushUnavailableDialog e espera a resposta antes de continuar."""
+
+    def decider(repo_path):
+        result = {"retry": False}
+        answered = threading.Event()
+
+        def on_choice(retry):
+            result["retry"] = retry
+            answered.set()
+
+        root.after(0, lambda: PushUnavailableDialog(root, repo_path, on_choice))
+        answered.wait()
+        return result["retry"]
+
+    return decider
 
 
 class AddRepoDialog(ctk.CTkToplevel):
@@ -193,6 +262,7 @@ class RepoCard(ctk.CTkFrame):
         if not history_mode:
             ctk.CTkButton(actions, text="Commitar", width=90, command=self._commit).pack(side="left", padx=(0, 6))
             ctk.CTkButton(actions, text="Push", width=70, command=self._push).pack(side="left", padx=(0, 6))
+            ctk.CTkButton(actions, text="Sincronizar", width=100, command=self._sync).pack(side="left", padx=(0, 6))
             enabled = target.get("enabled", True)
             self.toggle_btn = ctk.CTkButton(actions, text="Desativar" if enabled else "Ativar", width=90,
                                              fg_color="gray50", command=self._toggle_enabled)
@@ -283,6 +353,10 @@ class RepoCard(ctk.CTkFrame):
 
     def _push(self):
         run_bg(lambda: core.push_repo(self.path), lambda r: self._after_action(r), self.root)
+
+    def _sync(self):
+        decider = make_gui_push_decider(self.root)
+        run_bg(lambda: core.sync_repo(self.path, push_decider=decider), lambda r: self._after_action(r), self.root)
 
     def _after_action(self, result):
         if isinstance(result, Exception):
@@ -394,6 +468,7 @@ class App(ctk.CTk):
         btns.pack(side="right")
         ctk.CTkButton(btns, text="Commitar tudo", command=self._commit_all).pack(side="left", padx=4)
         ctk.CTkButton(btns, text="Push tudo", command=self._push_all).pack(side="left", padx=4)
+        ctk.CTkButton(btns, text="Sincronizar tudo", command=self._sync_all).pack(side="left", padx=4)
         ctk.CTkButton(btns, text="Atualizar", fg_color="gray40", command=self.show_status).pack(side="left", padx=4)
 
         cfg = core.load_config()
@@ -415,6 +490,10 @@ class App(ctk.CTk):
 
     def _push_all(self):
         self._run_global_action(core.push_all, "Push em lote concluido.")
+
+    def _sync_all(self):
+        decider = make_gui_push_decider(self)
+        self._run_global_action(lambda: core.run_all(push_decider=decider), "Sincronizacao em lote concluida.")
 
     def _run_global_action(self, fn, done_message):
         def done(result):

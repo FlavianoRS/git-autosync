@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.2.0
+version: 3.3.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
@@ -103,6 +103,12 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
   explicitamente para sincronizar agora, ja que isso cria commits e publica de verdade.
   Se o usuario so quer revisar antes de publicar, prefira `commit-now` e pergunte antes
   de rodar `push-now` depois.
+- `run-now`/`sync` verificam se o remoto esta acessivel ANTES de commitar. Se nao
+  estiver e o comando estiver rodando com terminal interativo, ele PERGUNTA no
+  proprio terminal (`[T] tentar novamente` / `[C] apenas commit`) e fica esperando
+  resposta ali mesmo — nao tem como essa pergunta ser respondida por voce, avise o
+  usuario que precisa responder no terminal. Sem terminal interativo (chamado via
+  script), ele so avisa e segue commitando sem dar push, sem travar.
 - Em maquina nova, apos instalar a skill: nao ha config previo. Primeiro comando
   ja cria `~/.git-autosync/config.json` vazio (sem alvos) - use `add` para configurar
   os diretorios da pessoa antes de `install`/`run-now`.

@@ -95,9 +95,26 @@ def cmd_set_schedule(args):
     print(f"Horarios atualizados: {', '.join(times)}")
 
 
+def _cli_push_decider(repo_path):
+    """Chamado quando o remoto de repo_path esta inacessivel, antes de
+    commitar. Pergunta no terminal [T]/[C]; sem terminal interativo (rodando
+    de um script/tarefa), so avisa e segue commitando sem dar push."""
+    if not sys.stdin.isatty():
+        print(f"[aviso] {repo_path}: remoto inacessivel agora, commitando sem dar push.")
+        return False
+    while True:
+        choice = input(f"[aviso] {repo_path}: remoto inacessivel agora. "
+                        f"[T] tentar novamente  [C] apenas commit: ").strip().lower()
+        if choice == "t":
+            return True
+        if choice == "c":
+            return False
+        print("Resposta invalida, digite T ou C.")
+
+
 def cmd_run_now(args):
     print("Rodando sync agora (commit + push)...")
-    status = core.run_all()
+    status = core.run_all(push_decider=_cli_push_decider)
     for path, r in status["repos"].items():
         tag = "[OK]" if r["success"] else "[ERRO]"
         print(f"{tag} {path}: {r['message']}")
@@ -140,7 +157,7 @@ def cmd_push(args):
 
 def cmd_sync(args):
     path = _resolve_repo_arg(args.repo)
-    r = core.sync_repo(path)
+    r = core.sync_repo(path, push_decider=_cli_push_decider)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 

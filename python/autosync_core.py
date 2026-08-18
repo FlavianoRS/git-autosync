@@ -4,6 +4,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -199,12 +200,102 @@ def push_repo(repo_path):
     return result
 
 
-def sync_repo(repo_path):
-    """Commit followed by push — used by the scheduled task and `run-now`.
-    Returns dict: path, time, success, hadChanges, message."""
+def has_remote(repo_path):
+    result = _run(["git", "remote"], cwd=repo_path)
+    return bool(result.stdout.strip())
+
+
+def _kill_process_tree(pid):
+    if IS_WINDOWS:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True, **_no_window_flags())
+    else:
+        import signal
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except Exception:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+
+
+def _run_hard_timeout(args, cwd, timeout):
+    """Como _run(), mas garante que o timeout e respeitado de verdade.
+
+    git (no Windows, pra remotos http/https) as vezes deixa um processo
+    auxiliar de rede que herda os pipes de stdout/stderr - matar so o
+    processo principal (o que subprocess.run+timeout faz) nao fecha esses
+    pipes, e o communicate() final fica esperando o auxiliar por conta
+    propria (~20s+ de timeout de conexao do Windows), ignorando na pratica
+    o timeout pedido. Aqui, ao expirar, mata a arvore de processos inteira
+    antes de tentar ler a saida de novo."""
+    proc = subprocess.Popen(
+        args, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace", **_no_window_flags(),
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        _kill_process_tree(proc.pid)
+        try:
+            stdout, stderr = proc.communicate(timeout=3)
+        except Exception:
+            stdout, stderr = "", "timeout"
+        return subprocess.CompletedProcess(args, -1, stdout, stderr)
+
+
+def check_remote_reachable(repo_path, timeout=8):
+    """True/False if the repo has a remote and it is/isn't reachable right
+    now (network + credenciais). None if the repo has no remote configured
+    at all (nada pra verificar, nada pra fazer push)."""
+    if not has_remote(repo_path):
+        return None
+    try:
+        result = _run_hard_timeout(["git", "ls-remote", "--exit-code", "origin"], cwd=repo_path, timeout=timeout)
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+def sync_repo(repo_path, push_decider=None):
+    """Commit followed by push — used pela tarefa agendada, `run-now` e o
+    comando ad-hoc `sync`. Returns dict: path, time, success, hadChanges,
+    message.
+
+    Antes de commitar, verifica se o remoto esta acessivel. Se nao estiver:
+    - push_decider(repo_path) e chamado (quando informado) - deve retornar
+      True pra tentar de novo (reverifica a conexao) ou False pra seguir
+      commitando sem tentar dar push nessa rodada.
+    - sem push_decider (uso nao interativo, ex: tarefa agendada), tenta de
+      novo silenciosamente algumas vezes e, se continuar sem acesso, segue
+      so commitando - nunca fica esperando input pra sempre."""
+    skip_push = False
+    reachable = check_remote_reachable(repo_path)
+    if reachable is False:
+        if push_decider is not None:
+            while reachable is False and push_decider(repo_path):
+                reachable = check_remote_reachable(repo_path)
+            if reachable is False:
+                skip_push = True
+        else:
+            for _ in range(2):
+                time.sleep(2)
+                reachable = check_remote_reachable(repo_path)
+                if reachable is not False:
+                    break
+            if reachable is False:
+                skip_push = True
+                write_log(repo_path, "aviso: remoto inacessivel, commitando sem dar push nesta rodada.")
+
     commit_result = commit_repo(repo_path)
-    if not commit_result["success"] or not commit_result["hadChanges"]:
-        return {k: commit_result[k] for k in ("path", "time", "success", "hadChanges", "message")}
+    if not commit_result["success"] or not commit_result["hadChanges"] or skip_push:
+        result = {k: commit_result[k] for k in ("path", "time", "success", "hadChanges", "message")}
+        result["pushed"] = False
+        if skip_push and commit_result["success"]:
+            result["message"] += " | push pulado (remoto inacessivel)"
+        return result
 
     push_result = push_repo(repo_path)
     return {
@@ -212,6 +303,7 @@ def sync_repo(repo_path):
         "time": push_result["time"],
         "success": push_result["success"],
         "hadChanges": True,
+        "pushed": push_result["success"],
         "message": f"{commit_result['message']} | {push_result['message']}",
     }
 
@@ -223,20 +315,20 @@ def _update_status_entry(status, repo_path, **fields):
     return entry
 
 
-def run_all():
+def run_all(push_decider=None):
     """Commit + push every enabled target — used by the scheduled task and
-    the `run-now` CLI command."""
+    the `run-now` CLI command. Ver sync_repo() pro que push_decider faz."""
     cfg = load_config()
     paths = resolve_targets(cfg.get("targets", []))
     status = load_status()
     for p in paths:
-        r = sync_repo(p)
+        r = sync_repo(p, push_decider=push_decider)
         _update_status_entry(
             status, p,
             lastRun=r["time"], success=r["success"],
             hadChanges=r["hadChanges"], message=r["message"],
         )
-        if r["success"] and r["hadChanges"]:
+        if r.get("pushed"):
             _update_status_entry(status, p, lastPush=r["time"])
     status["lastSyncRun"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_status(status)
