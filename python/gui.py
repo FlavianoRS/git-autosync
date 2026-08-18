@@ -628,6 +628,22 @@ class App(ctk.CTk):
         box.configure(state="disabled")
 
 
+def _set_windows_app_id():
+    """Sem isso, o Windows agrupa a janela na barra de tarefas pelo host do
+    processo (pythonw.exe) ou pelo icone associado ao arquivo .py/.pyw sendo
+    executado, ignorando o icone que a janela define — e mostra aquele icone
+    generico de 'folha com o logo do Python' em vez do nosso. Precisa ser
+    chamado ANTES de criar qualquer janela."""
+    if not core.IS_WINDOWS:
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("GitAutoSync.App")
+    except Exception:
+        pass
+
+
 def run_gui():
+    _set_windows_app_id()
     app = App()
     app.mainloop()

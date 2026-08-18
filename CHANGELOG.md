@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.3.1
+
+- **Fix**: o fix de icone da 3.3.0 (reaplicar `iconbitmap`) nao resolvia
+  quando a GUI roda via `python app.py`/tray em vez do atalho instalado — a
+  barra de tarefas continuava mostrando o icone generico de arquivo
+  `.py`/`.pyw`. Causa real: sem um `AppUserModelID` explicito, o Windows
+  agrupa a janela pelo host do processo (`pythonw.exe`) ou pelo icone do
+  arquivo executado, ignorando o icone que a janela define. Adicionado
+  `SetCurrentProcessExplicitAppUserModelID` no início da GUI (fix padrao
+  documentado pra apps Python/Tk no Windows).
+
 ## 3.3.0
 
 - **Fix**: icone da janela sumia da barra de tarefas depois de abrir (bug
