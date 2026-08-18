@@ -151,41 +151,77 @@ def make_gui_push_decider(root, give_up_label="Apenas commit"):
     return decider
 
 
-class CommitMessageDialog(ctk.CTkToplevel):
-    """Perguntado antes de cada Commitar/Sincronizar individual - deixar
-    vazio gera a mensagem automaticamente (via IA, ou fallback), digitar
-    algo usa exatamente esse texto como mensagem do commit."""
+class CommitReviewDialog(ctk.CTkToplevel):
+    """Aberto antes de cada Commitar/Sincronizar individual: fica staging +
+    gerando a mensagem (via IA/fallback) em background e mostra o resultado
+    editavel - confirma pra commitar com o texto final (editado ou nao),
+    cancela pra desfazer o staging (core.unstage) sem commitar nada."""
 
-    def __init__(self, master, on_confirm):
+    def __init__(self, master, repo_path, on_confirm, confirm_label="Commitar"):
         super().__init__(master)
-        self.title("Mensagem do commit")
-        self.geometry("520x260")
+        self.title("Revisar mensagem do commit")
+        self.geometry("560x300")
         self.resizable(False, False)
         _set_window_icon(self)
+        self.repo_path = repo_path
         self.on_confirm = on_confirm
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.root = master
+        self.had_changes = False
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
 
-        ctk.CTkLabel(self, text="Mensagem do commit:", font=ctk.CTkFont(weight="bold")).pack(
-            anchor="w", padx=16, pady=(16, 2))
-        ctk.CTkLabel(self, text="Deixe vazio pra gerar automaticamente (via IA, com fallback se nao tiver).",
-                     text_color="gray", font=ctk.CTkFont(size=11), wraplength=480, justify="left").pack(
-            anchor="w", padx=16, pady=(0, 8))
+        ctk.CTkLabel(self, text="Mensagem do commit (gerada automaticamente - edite se quiser):",
+                     font=ctk.CTkFont(weight="bold"), wraplength=520, justify="left").pack(
+            anchor="w", padx=16, pady=(16, 8))
 
-        self.textbox = ctk.CTkTextbox(self, height=90)
+        self.textbox = ctk.CTkTextbox(self, height=110)
+        self.textbox.insert("1.0", "gerando mensagem automaticamente...")
+        self.textbox.configure(state="disabled")
         self.textbox.pack(fill="x", padx=16)
+
+        self.status_lbl = ctk.CTkLabel(self, text="", text_color="gray", font=ctk.CTkFont(size=11))
+        self.status_lbl.pack(anchor="w", padx=16, pady=(6, 0))
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(pady=20)
-        ctk.CTkButton(row, text="Commitar", width=150, command=self._confirm).pack(side="left", padx=6)
-        ctk.CTkButton(row, text="Cancelar", width=150, fg_color="gray40", command=self.destroy).pack(side="left", padx=6)
+        self.confirm_btn = ctk.CTkButton(row, text=confirm_label, width=170, command=self._confirm, state="disabled")
+        self.confirm_btn.pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Cancelar", width=170, fg_color="gray40", command=self._cancel).pack(side="left", padx=6)
 
         self.grab_set()
-        self.textbox.focus_set()
+        run_bg(lambda: core.stage_and_generate_message(repo_path), self._on_staged, master)
+
+    def _on_staged(self, result):
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+
+        if isinstance(result, Exception) or result.get("error"):
+            err = result.get("error") if isinstance(result, dict) else str(result)
+            self.status_lbl.configure(text=f"Erro ao preparar commit: {err}", text_color="#c0392b")
+            self.textbox.configure(state="disabled")
+            return
+
+        if not result["hadChanges"]:
+            self.status_lbl.configure(text="Sem alteracoes pendentes - nada a commitar.")
+            self.textbox.configure(state="disabled")
+            return
+
+        self.had_changes = True
+        self.textbox.insert("1.0", result["message"])
+        self.confirm_btn.configure(state="normal")
+        self.status_lbl.configure(text="Revise/edite se quiser, depois confirme.")
 
     def _confirm(self):
         text = self.textbox.get("1.0", "end").strip()
+        if not text:
+            messagebox.showerror("Erro", "A mensagem nao pode ficar vazia.", parent=self)
+            return
         self.destroy()
-        self.on_confirm(text or None)
+        self.on_confirm(text)
+
+    def _cancel(self):
+        if self.had_changes:
+            run_bg(lambda: core.unstage(self.repo_path), lambda r: None, self.root)
+        self.destroy()
 
 
 class AddRepoDialog(ctk.CTkToplevel):
@@ -399,8 +435,8 @@ class RepoCard(ctk.CTkFrame):
 
     def _commit(self):
         def on_confirm(message):
-            run_bg(lambda: core.commit_repo(self.path, message=message), lambda r: self._after_action(r), self.root)
-        CommitMessageDialog(self.root, on_confirm)
+            run_bg(lambda: core.finalize_commit(self.path, message), lambda r: self._after_action(r), self.root)
+        CommitReviewDialog(self.root, self.path, on_confirm, confirm_label="Commitar")
 
     def _push(self):
         decider = make_gui_push_decider(self.root, give_up_label="Cancelar")
@@ -409,9 +445,9 @@ class RepoCard(ctk.CTkFrame):
     def _sync(self):
         def on_confirm(message):
             decider = make_gui_push_decider(self.root, give_up_label="Apenas commit")
-            run_bg(lambda: core.sync_repo(self.path, push_decider=decider, message=message),
+            run_bg(lambda: core.finalize_sync(self.path, message, push_decider=decider),
                    lambda r: self._after_action(r), self.root)
-        CommitMessageDialog(self.root, on_confirm)
+        CommitReviewDialog(self.root, self.path, on_confirm, confirm_label="Commitar e enviar")
 
     def _after_action(self, result):
         if isinstance(result, Exception):
