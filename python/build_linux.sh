@@ -16,8 +16,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-pyinstaller --noconfirm --onefile --name git-autosync app.py
-pyinstaller --noconfirm --onefile --name git-autosync-sync run_sync.py
+pyinstaller --noconfirm git-autosync.spec
+pyinstaller --noconfirm git-autosync-sync.spec
 
 echo ""
 echo "Prontos em: $(pwd)/dist/git-autosync e dist/git-autosync-sync"

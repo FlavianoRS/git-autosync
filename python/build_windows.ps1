@@ -10,8 +10,8 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-pyinstaller --noconfirm --onefile --windowed --name git-autosync app.py
-pyinstaller --noconfirm --onefile --windowed --name git-autosync-sync run_sync.py
+pyinstaller --noconfirm git-autosync.spec
+pyinstaller --noconfirm git-autosync-sync.spec
 
 Write-Host ""
 Write-Host "Prontos em: $PSScriptRoot\dist\git-autosync.exe e dist\git-autosync-sync.exe"
