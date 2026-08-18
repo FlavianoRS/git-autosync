@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.7.0
+version: 3.8.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
@@ -73,6 +73,7 @@ de `python app.py` nos comandos abaixo.
 <python> "<script>" exclude "<caminho do repo>"    # tira 1 repo de dentro de um alvo root (nao remove a pasta)
 <python> "<script>" include "<caminho do repo>"    # desfaz o exclude
 <python> "<script>" set-schedule "12:00,17:30"
+<python> "<script>" preview [--repo <caminho>] [--json]                            # gera a mensagem e mostra, SEM commitar nada
 <python> "<script>" commit [--repo <caminho> | --all] [-m "mensagem" | --review]   # commita, sem push
 <python> "<script>" push [--repo <caminho> | --all]                                # da push do que ja foi commitado
 <python> "<script>" sync [--repo <caminho> | --all] [-m "mensagem" | --review]     # commit + push de verdade
@@ -98,9 +99,16 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
   Nao pode ser combinado com `--all`.
 - `--review` (existe em `commit`/`sync`) exige terminal interativo pra
   perguntar `[S]/[E]/[C]` - rodando via chamada de ferramenta (o seu caso)
-  isso sempre falha com "precisa de terminal interativo". Nao use `--review`;
-  se o usuario quer ver a mensagem antes de commitar, gere com `-m` ja
-  definido, ou informe a mensagem que ele mandar via chat.
+  isso sempre falha com "precisa de terminal interativo". NAO use `--review`.
+- Quando o usuario quiser ver/editar a mensagem antes de commitar (e voce
+  esta rodando via chamada de ferramenta, sem terminal interativo): use
+  `preview` primeiro - ele gera a mensagem e mostra, sem commitar nem deixar
+  nada staged (sempre desfaz o `git add` que faz internamente pra gerar).
+  Mostre essa mensagem pro usuario no chat, deixe ele pedir ajuste se quiser,
+  e só depois rode `commit -m "<mensagem final>"` (ou `sync -m "..."` se ele
+  tambem quiser publicar). Nunca commite sem mostrar a mensagem gerada
+  primeiro quando o pedido do usuario for algo como "deixa eu ver a
+  mensagem antes"/"quero revisar o commit".
 - `set-schedule` reescreve a tarefa agendada/cron inteira (idempotente); avise o
   usuario que os horarios antigos serao substituidos.
 - Nunca edite `~/.git-autosync/status.json` ou `config.json` manualmente com Edit/Write

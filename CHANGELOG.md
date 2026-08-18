@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.8.0
+
+- **Comando `preview`**: gera a mensagem de commit e mostra, sem commitar
+  nem deixar nada staged (sempre desfaz o `git add` interno). Pensado pra
+  quem chama via skill do Claude Code/Codex (sem terminal interativo pro
+  `--review` funcionar) — a IA mostra a mensagem no chat, o usuário pede
+  ajuste se quiser, e ela confirma com `commit -m "..."`/`sync -m "..."`.
+
 ## 3.7.0
 
 - **Revisar/editar a mensagem gerada antes de commitar (e antes do push)**:

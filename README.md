@@ -145,14 +145,19 @@ python app.py sync -m "feat: nova tela"        # idem, pro commit dentro do sync
 
 python app.py commit --review   # mostra a mensagem gerada, deixa usar/editar/cancelar antes de commitar
 python app.py sync --review     # idem, e só dá push depois de confirmar
+
+python app.py preview            # so gera e mostra a mensagem, sem commitar nada (nem deixa staged)
 ```
 
 `--repo` e `--all` são mutuamente exclusivos. `-m`/`--message` e `--review`
 não podem ser usados com `--all` (uma mensagem/revisão só não serve pra
 vários repositórios de uma vez), e são mutuamente exclusivos entre si.
-`--review` precisa de terminal interativo. Sem `-m`/`--review`, a mensagem é
-gerada automaticamente (via IA, com fallback se não tiver). `push`/`sync`
-verificam se o remoto está acessível antes de dar push (ou antes de
+`--review` precisa de terminal interativo — pra revisar sem um terminal de
+verdade (ex: pedindo pela skill do Claude Code/Codex, via chat), use
+`preview` pra ver a mensagem gerada e depois `commit -m "..."`/`sync -m "..."`
+com a versão final. Sem `-m`/`--review`, a mensagem é gerada automaticamente
+(via IA, com fallback se não tiver). `push`/`sync` verificam se o remoto
+está acessível antes de dar push (ou antes de
 commitar, no caso do `sync`) — se não estiver, perguntam `[T] tentar
 novamente` / `[C]` no terminal (cancelar o push, ou seguir só commitando,
 dependendo do comando).
