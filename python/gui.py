@@ -16,6 +16,26 @@ import autosync_core as core
 ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
 
+_icon_photo = None  # mantem referencia viva (Tk descarta PhotoImage sem dono)
+
+
+def _set_window_icon(win):
+    global _icon_photo
+    try:
+        if core.IS_WINDOWS:
+            ico = app_module.asset_path("assets", "icon.ico")
+            if ico.exists():
+                win.iconbitmap(str(ico))
+        else:
+            png = app_module.asset_path("assets", "icon.png")
+            if png.exists():
+                from PIL import Image, ImageTk
+                if _icon_photo is None:
+                    _icon_photo = ImageTk.PhotoImage(Image.open(png))
+                win.iconphoto(True, _icon_photo)
+    except Exception:
+        pass
+
 SIDEBAR_WIDTH = 210
 HISTORY_PRESETS = [("7 dias", "7d"), ("30 dias", "30d"), ("90 dias", "90d"), ("Tudo", "all")]
 
@@ -63,9 +83,11 @@ class AddRepoDialog(ctk.CTkToplevel):
     def __init__(self, master, on_added):
         super().__init__(master)
         self.title("Adicionar repositorio")
-        self.geometry("520x180")
+        self.geometry("520x300")
+        self.minsize(520, 300)
         self.resizable(False, False)
         self.on_added = on_added
+        _set_window_icon(self)
         self.grab_set()
 
         ctk.CTkLabel(self, text="Caminho:").pack(anchor="w", padx=16, pady=(16, 2))
@@ -79,7 +101,7 @@ class AddRepoDialog(ctk.CTkToplevel):
         self.type_var = ctk.StringVar(value="repo")
         ctk.CTkOptionMenu(self, values=["repo", "root"], variable=self.type_var, width=140).pack(anchor="w", padx=16)
 
-        ctk.CTkButton(self, text="Adicionar", command=self._add).pack(pady=16)
+        ctk.CTkButton(self, text="Adicionar", width=160, height=36, command=self._add).pack(pady=28)
 
     def _browse(self):
         d = filedialog.askdirectory(parent=self)
@@ -279,6 +301,7 @@ class App(ctk.CTk):
         self.title(f"Git AutoSync {app_module.get_version()}")
         self.geometry("1020x640")
         self.minsize(820, 520)
+        _set_window_icon(self)
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
