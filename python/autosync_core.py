@@ -22,6 +22,8 @@ DEFAULT_CONFIG = {
     "targets": [],
     "taskName": "GitAutoSyncPy",
     "trayEnabled": False,
+    "theme": "system",
+    "viewMode": "card",
 }
 
 
@@ -589,6 +591,43 @@ def get_commit_log(repo_path, since=None, limit=50):
 
 
 # ---- scheduler (OS-native recurring execution) ----
+
+# ---- notificacao nativa (usada quando a rodada agendada tem falha de push) ----
+
+def notify_windows(title, message, timeout_ms=8000):
+    """Balao/toast nativo do Windows (NotifyIcon.ShowBalloonTip), sem
+    depender de nenhum icone de bandeja ja aberto - dispara e esquece
+    (Popen, nao espera terminar). No-op fora do Windows."""
+    if not IS_WINDOWS:
+        return
+    icon_path = str(Path(__file__).resolve().parent / "assets" / "icon.ico")
+    ps_script = (
+        "Add-Type -AssemblyName System.Windows.Forms\n"
+        "Add-Type -AssemblyName System.Drawing\n"
+        "$ni = New-Object System.Windows.Forms.NotifyIcon\n"
+        "try { $ni.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($env:GAS_ICON) }\n"
+        "catch { $ni.Icon = [System.Drawing.SystemIcons]::Warning }\n"
+        "$ni.Visible = $true\n"
+        "$ni.ShowBalloonTip([int]$env:GAS_TIMEOUT, $env:GAS_TITLE, $env:GAS_MSG, "
+        "[System.Windows.Forms.ToolTipIcon]::Warning)\n"
+        "Start-Sleep -Milliseconds ([int]$env:GAS_TIMEOUT + 500)\n"
+        "$ni.Dispose()\n"
+    )
+    env = {
+        **os.environ,
+        "GAS_ICON": icon_path,
+        "GAS_TITLE": title,
+        "GAS_MSG": message,
+        "GAS_TIMEOUT": str(timeout_ms),
+    }
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps_script],
+            env=env, **_no_window_flags(),
+        )
+    except Exception:
+        pass
+
 
 def _sync_command_line(sync_target):
     """sync_target: path to a frozen exe, or a .py script to run with current interpreter."""
