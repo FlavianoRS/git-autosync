@@ -151,6 +151,43 @@ def make_gui_push_decider(root, give_up_label="Apenas commit"):
     return decider
 
 
+class CommitMessageDialog(ctk.CTkToplevel):
+    """Perguntado antes de cada Commitar/Sincronizar individual - deixar
+    vazio gera a mensagem automaticamente (via IA, ou fallback), digitar
+    algo usa exatamente esse texto como mensagem do commit."""
+
+    def __init__(self, master, on_confirm):
+        super().__init__(master)
+        self.title("Mensagem do commit")
+        self.geometry("520x260")
+        self.resizable(False, False)
+        _set_window_icon(self)
+        self.on_confirm = on_confirm
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+        ctk.CTkLabel(self, text="Mensagem do commit:", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=16, pady=(16, 2))
+        ctk.CTkLabel(self, text="Deixe vazio pra gerar automaticamente (via IA, com fallback se nao tiver).",
+                     text_color="gray", font=ctk.CTkFont(size=11), wraplength=480, justify="left").pack(
+            anchor="w", padx=16, pady=(0, 8))
+
+        self.textbox = ctk.CTkTextbox(self, height=90)
+        self.textbox.pack(fill="x", padx=16)
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=20)
+        ctk.CTkButton(row, text="Commitar", width=150, command=self._confirm).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Cancelar", width=150, fg_color="gray40", command=self.destroy).pack(side="left", padx=6)
+
+        self.grab_set()
+        self.textbox.focus_set()
+
+    def _confirm(self):
+        text = self.textbox.get("1.0", "end").strip()
+        self.destroy()
+        self.on_confirm(text or None)
+
+
 class AddRepoDialog(ctk.CTkToplevel):
     def __init__(self, master, on_added):
         super().__init__(master)
@@ -279,7 +316,7 @@ class RepoCard(ctk.CTkFrame):
                 ctk.CTkButton(actions, text="Remover", width=80, fg_color="#8a2c2c", hover_color="#6f2323",
                               command=self._remove).pack(side="left", padx=(0, 6))
             else:
-                ctk.CTkButton(actions, text="Excluir da pasta", width=120, fg_color="#8a2c2c",
+                ctk.CTkButton(actions, text="Ignorar", width=80, fg_color="#8a2c2c",
                               hover_color="#6f2323", command=self._exclude_from_root).pack(side="left", padx=(0, 6))
 
         self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=120, fg_color="transparent",
@@ -361,15 +398,20 @@ class RepoCard(ctk.CTkFrame):
                 self.panel = None
 
     def _commit(self):
-        run_bg(lambda: core.commit_repo(self.path), lambda r: self._after_action(r), self.root)
+        def on_confirm(message):
+            run_bg(lambda: core.commit_repo(self.path, message=message), lambda r: self._after_action(r), self.root)
+        CommitMessageDialog(self.root, on_confirm)
 
     def _push(self):
         decider = make_gui_push_decider(self.root, give_up_label="Cancelar")
         run_bg(lambda: core.push_repo_checked(self.path, push_decider=decider), lambda r: self._after_action(r), self.root)
 
     def _sync(self):
-        decider = make_gui_push_decider(self.root, give_up_label="Apenas commit")
-        run_bg(lambda: core.sync_repo(self.path, push_decider=decider), lambda r: self._after_action(r), self.root)
+        def on_confirm(message):
+            decider = make_gui_push_decider(self.root, give_up_label="Apenas commit")
+            run_bg(lambda: core.sync_repo(self.path, push_decider=decider, message=message),
+                   lambda r: self._after_action(r), self.root)
+        CommitMessageDialog(self.root, on_confirm)
 
     def _after_action(self, result):
         if isinstance(result, Exception):
@@ -395,8 +437,10 @@ class RepoCard(ctk.CTkFrame):
         self.on_changed()
 
     def _exclude_from_root(self):
-        if not messagebox.askyesno("Confirmar", f"Excluir {self.path} da pasta {self.source_path}?\n"
-                                                  f"O autosync para de considerar esse repositorio."):
+        if not messagebox.askyesno("Confirmar", f"Ignorar {self.path}?\n\n"
+                                                  f"O repositorio continua no disco, exatamente como esta - "
+                                                  f"o autosync so para de sincroniza-lo dentro da pasta "
+                                                  f"{self.source_path}."):
             return
         core.exclude_repo_from_root(self.source_path, self.path)
         self.on_changed()
