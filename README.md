@@ -12,6 +12,19 @@ referência histórica. Não desenvolva features novas nela.
 
 ## Instalação rápida (recomendada)
 
+Guia simplificado (não-técnico) em [`COMO_INSTALAR.md`](COMO_INSTALAR.md).
+
+- **Windows**: duplo clique em `instalar.bat`
+- **Linux/macOS**: `./instalar.sh`
+
+Esses scripts detectam Python automaticamente e chamam o instalador
+(`installer/install.py`). Se não acharem Python instalado, caem pra versão
+standalone (usa os `.exe`/binários já empacotados em `python/dist/`, sem
+precisar de Python na máquina de destino — ver `COMO_INSTALAR.md`) ou
+explicam como resolver.
+
+Rodando o instalador Python direto:
+
 ```bash
 python installer/install.py
 ```
@@ -164,10 +177,12 @@ não deveriam sair da máquina, ou onde publicar sem revisão não é aceitável
 ## Estrutura do projeto
 
 ```
-python/       versao atual (Windows + Linux): core, CLI, GUI (customtkinter)
-installer/    wizard de instalacao (GUI/CLI/Skill)
-skill/        fonte versionada da skill do Claude Code/Codex (copiada pelo instalador)
-legacy/       versao original em PowerShell (Windows-only, referencia historica)
+instalar.bat / instalar.sh   ponto de entrada (detecta Python, cai pra standalone se faltar)
+COMO_INSTALAR.md             guia simples pro time, nao-tecnico
+python/                      versao atual (Windows + Linux): core, CLI, GUI (customtkinter)
+installer/                   wizard de instalacao (GUI/CLI/Skill) + fallback standalone (sem Python)
+skill/                       fonte versionada da skill do Claude Code/Codex (copiada pelo instalador)
+legacy/                      versao original em PowerShell (Windows-only, referencia historica)
 ```
 
 Ver `CHANGELOG.md` para o histórico de versões.

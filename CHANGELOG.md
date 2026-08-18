@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.2.0
+
+- **Ponto de entrada único**: `instalar.bat` (Windows) / `instalar.sh`
+  (Linux/macOS) na raiz do projeto — detecta Python automaticamente e chama o
+  instalador; sem Python, cai pra instalação **standalone**.
+- **Instalador standalone** (`installer/install_standalone.bat`/`.sh`): instala
+  a partir dos binários já empacotados em `python/dist/` (gerados uma vez por
+  alguém com Python via `build_windows.ps1`/`build_linux.sh`) — tarefa
+  agendada, tray e atalho, tudo **sem exigir Python** na máquina de quem só
+  vai instalar.
+- **`COMO_INSTALAR.md`** na raiz: guia não-técnico explicando as 3 formas
+  (GUI, CLI, Skill) e o que fazer sem Python instalado.
+
 ## 3.1.0
 
 - **Fix**: diálogo "Adicionar repositório" tinha o botão "Adicionar" cortado
