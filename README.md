@@ -76,10 +76,11 @@ Sidebar com:
   horário do último push, botões **Commitar**/**Push**/**Sincronizar**
   individuais (cada um agindo só naquele repositório), e uma seta pra
   expandir e ver as últimas mensagens de commit geradas. Cards que vieram de
-  uma pasta `root` mostram "via pasta: `<caminho>`" e não têm
-  Ativar/Desativar/Remover — quem controla é a pasta-raiz (via CLI:
-  `remove <caminho-da-pasta>`), não o repositório individual. No topo,
-  "Commitar tudo"/"Push tudo"/"Sincronizar tudo" agem em todos de uma vez.
+  uma pasta `root` mostram "via pasta: `<caminho>`" e, no lugar de
+  Ativar/Desativar/Remover, têm um botão **"Excluir da pasta"** — tira só
+  aquele repositório da varredura do root (equivalente ao `exclude` do CLI),
+  sem remover a pasta-raiz inteira. No topo, "Commitar tudo"/"Push
+  tudo"/"Sincronizar tudo" agem em todos de uma vez.
   `Push`/`Sincronizar` verificam se o remoto está acessível antes — se não
   estiver, um popup oferece tentar de novo ou desistir (cancelar o push, ou
   seguir só commitando, dependendo do botão).
@@ -98,6 +99,8 @@ python app.py list                        # mostra alvos e horários configurado
 python app.py add <caminho> --type repo   # adiciona um repositório
 python app.py add <caminho> --type root   # adiciona uma pasta-raiz (sincroniza todo repo git dentro dela)
 python app.py remove <caminho>
+python app.py exclude <caminho-do-repo>   # exclui 1 repo de dentro de uma pasta-raiz (root)
+python app.py include <caminho-do-repo>   # desfaz um exclude anterior
 python app.py set-schedule "12:00,17:30"  # define horários e já reinstala a tarefa agendada
 python app.py commit --all                # so verifica e commita, SEM push, em TODOS os alvos
 python app.py push --all                  # so da push do que ja foi commitado, em TODOS os alvos

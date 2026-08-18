@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.4.0
+version: 3.5.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
@@ -70,6 +70,8 @@ de `python app.py` nos comandos abaixo.
 <python> "<script>" list
 <python> "<script>" add "<caminho do repo>" --type repo      # ou --type root p/ pasta com varios repos
 <python> "<script>" remove "<caminho do repo>"
+<python> "<script>" exclude "<caminho do repo>"    # tira 1 repo de dentro de um alvo root (nao remove a pasta)
+<python> "<script>" include "<caminho do repo>"    # desfaz o exclude
 <python> "<script>" set-schedule "12:00,17:30"
 <python> "<script>" commit [--repo <caminho> | --all]   # commita, sem push (repo atual, outro, ou --all = TODOS)
 <python> "<script>" push [--repo <caminho> | --all]     # da push do que ja foi commitado (repo atual, outro, ou --all)

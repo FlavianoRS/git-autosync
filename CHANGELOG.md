@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.5.0
+
+- **Exclusão de repositórios dentro de um alvo `root`**: até aqui, um alvo
+  tipo `root` (pasta com vários repos) sincronizava tudo que tivesse `.git`
+  lá dentro, sem exceção. Agora dá pra excluir repositórios específicos:
+  - CLI: `python app.py exclude <caminho-do-repo>` / `include <caminho>`
+    (desfaz).
+  - GUI: botão **"Excluir da pasta"** nos cards que vêm de um `root`
+    (Status/Histórico), no lugar de Ativar/Remover.
+  - Guardado em `exclude: [...]` no próprio alvo `root` do `config.json`.
+
 ## 3.4.0
 
 - **Fix**: GUI mostrava só 1 card pra um alvo tipo `root` (a pasta inteira,
