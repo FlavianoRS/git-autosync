@@ -159,6 +159,121 @@ def include_repo_in_root(root_path, repo_path):
     return False
 
 
+def _generate_commit_message(repo_path):
+    """Assume que ja tem alteracoes staged. Gera a mensagem via `claude`,
+    com fallback se nao tiver o CLI ou ele nao responder."""
+    diff = _run(["git", "diff", "--staged"], cwd=repo_path).stdout
+    if len(diff) > 12000:
+        diff = diff[:12000] + "\n...(diff truncado)..."
+
+    prompt = (
+        "Gere APENAS uma mensagem de commit no padrao Conventional Commits "
+        "(feat:, fix:, chore:, docs:, refactor:, etc), em portugues, uma linha, "
+        "maximo 72 caracteres, baseada no diff abaixo. Responda SOMENTE com a "
+        f"mensagem, sem aspas, sem explicacao, sem markdown.\n\n{diff}"
+    )
+
+    commit_msg = None
+    claude_bin = shutil.which("claude")
+    if claude_bin:
+        try:
+            proc = _run(
+                [claude_bin, "-p", prompt, "--output-format", "text",
+                 "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch"],
+                cwd=repo_path, timeout=120,
+            )
+            commit_msg = proc.stdout.strip()
+        except Exception:
+            commit_msg = None
+
+    if not commit_msg:
+        commit_msg = f"chore: auto-commit {datetime.now():%Y-%m-%d %H:%M}"
+        write_log(repo_path, "aviso: claude nao retornou mensagem, usando fallback.")
+    return commit_msg
+
+
+def _do_commit(repo_path, message):
+    """Roda `git commit -F <message>` sobre o que ja estiver staged. Retorna
+    o hash do commit (ou None)."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
+        tmp.write(message)
+        tmp_path = tmp.name
+    try:
+        _run(["git", "commit", "-F", tmp_path], cwd=repo_path)
+    finally:
+        os.unlink(tmp_path)
+    write_log(repo_path, f"commit local ok: {message}")
+    return _run(["git", "rev-parse", "HEAD"], cwd=repo_path).stdout.strip() or None
+
+
+def stage_and_generate_message(repo_path):
+    """Da `git add -A` e gera a mensagem de commit (claude/fallback), SEM
+    commitar - pra revisar/editar antes de confirmar (dialogo da GUI, ou
+    --review no CLI). Retorna dict: hadChanges, message (None se
+    hadChanges False), error. Cancelar depois disso? chame unstage()."""
+    if not (Path(repo_path) / ".git").exists():
+        return {"hadChanges": False, "message": None, "error": "nao e repositorio git"}
+    try:
+        status = _run(["git", "status", "--porcelain"], cwd=repo_path)
+        if not status.stdout.strip():
+            return {"hadChanges": False, "message": None, "error": None}
+        _run(["git", "add", "-A"], cwd=repo_path)
+        return {"hadChanges": True, "message": _generate_commit_message(repo_path), "error": None}
+    except Exception as exc:
+        return {"hadChanges": False, "message": None, "error": str(exc)}
+
+
+def unstage(repo_path):
+    """Desfaz o `git add -A` de stage_and_generate_message() quando o
+    usuario cancela a revisao - deixa o repo como estava antes do clique."""
+    _run(["git", "reset"], cwd=repo_path)
+
+
+def finalize_commit(repo_path, message):
+    """Commita o que ja estiver staged (ver stage_and_generate_message) com
+    a mensagem informada (revisada/editada ou nao). Mesmo formato de
+    retorno de commit_repo()."""
+    result = {
+        "path": repo_path,
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "success": False,
+        "hadChanges": True,
+        "message": "",
+        "commitHash": None,
+    }
+    try:
+        result["commitHash"] = _do_commit(repo_path, message)
+        result["success"] = True
+        result["message"] = f"commit: {message}"
+    except Exception as exc:
+        result["message"] = f"erro inesperado: {exc}"
+        write_log(repo_path, f"ERRO: {exc}")
+    return result
+
+
+def finalize_sync(repo_path, message, push_decider=None):
+    """Como finalize_commit() + push (com a mesma checagem de conexao de
+    sync_repo) - usado depois de revisar a mensagem gerada por
+    stage_and_generate_message(). Mesmo formato de retorno de sync_repo()."""
+    commit_result = finalize_commit(repo_path, message)
+    if not commit_result["success"]:
+        commit_result["pushed"] = False
+        return commit_result
+
+    proceed, _ = _resolve_push_availability(repo_path, push_decider)
+    if not proceed:
+        write_log(repo_path, "aviso: remoto inacessivel, commit feito sem push.")
+        commit_result["pushed"] = False
+        commit_result["message"] += " | push pulado (remoto inacessivel)"
+        return commit_result
+
+    push_result = push_repo(repo_path)
+    commit_result["success"] = push_result["success"]
+    commit_result["pushed"] = push_result["success"]
+    commit_result["message"] = f"{commit_result['message']} | {push_result['message']}"
+    return commit_result
+
+
 def commit_repo(repo_path, message=None):
     """Stages and commits pending changes (no push). Returns dict: path, time,
     success, hadChanges, message, commitHash.
@@ -192,49 +307,11 @@ def commit_repo(repo_path, message=None):
         result["hadChanges"] = True
         _run(["git", "add", "-A"], cwd=repo_path)
 
-        if message:
-            commit_msg = message
-        else:
-            diff = _run(["git", "diff", "--staged"], cwd=repo_path).stdout
-            if len(diff) > 12000:
-                diff = diff[:12000] + "\n...(diff truncado)..."
+        commit_msg = message or _generate_commit_message(repo_path)
 
-            prompt = (
-                "Gere APENAS uma mensagem de commit no padrao Conventional Commits "
-                "(feat:, fix:, chore:, docs:, refactor:, etc), em portugues, uma linha, "
-                "maximo 72 caracteres, baseada no diff abaixo. Responda SOMENTE com a "
-                f"mensagem, sem aspas, sem explicacao, sem markdown.\n\n{diff}"
-            )
-
-            commit_msg = None
-            claude_bin = shutil.which("claude")
-            if claude_bin:
-                try:
-                    proc = _run(
-                        [claude_bin, "-p", prompt, "--output-format", "text",
-                         "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch"],
-                        cwd=repo_path, timeout=120,
-                    )
-                    commit_msg = proc.stdout.strip()
-                except Exception:
-                    commit_msg = None
-
-            if not commit_msg:
-                commit_msg = f"chore: auto-commit {datetime.now():%Y-%m-%d %H:%M}"
-                write_log(repo_path, "aviso: claude nao retornou mensagem, usando fallback.")
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
-            tmp.write(commit_msg)
-            tmp_path = tmp.name
-        try:
-            _run(["git", "commit", "-F", tmp_path], cwd=repo_path)
-        finally:
-            os.unlink(tmp_path)
-
+        result["commitHash"] = _do_commit(repo_path, commit_msg)
         result["success"] = True
         result["message"] = f"commit: {commit_msg}"
-        result["commitHash"] = _run(["git", "rev-parse", "HEAD"], cwd=repo_path).stdout.strip() or None
-        write_log(repo_path, f"commit local ok: {commit_msg}")
     except Exception as exc:
         result["message"] = f"erro inesperado: {exc}"
         write_log(repo_path, f"ERRO: {exc}")
