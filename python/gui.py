@@ -176,6 +176,10 @@ class RepoCard(ctk.CTkFrame):
         ctk.CTkLabel(title_box, text=name, font=ctk.CTkFont(weight="bold")).pack(anchor="w")
         ctk.CTkLabel(title_box, text=self.path, text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w")
 
+        self.pending_badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
+                                           text_color="white", padx=10, width=140)
+        self.pending_badge.pack(side="left", padx=8)
+
         self.badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
                                    text_color="white", padx=10, width=90)
         self.badge.pack(side="left", padx=8)
@@ -207,6 +211,7 @@ class RepoCard(ctk.CTkFrame):
     # ---- data ----
 
     def refresh(self):
+        self.pending_badge.configure(text="...", fg_color="gray40")
         self.badge.configure(text="...", fg_color="gray40")
         self.last_push_lbl.configure(text="ultimo push: ...")
 
@@ -214,14 +219,22 @@ class RepoCard(ctk.CTkFrame):
             status = core.load_status()
             entry = status.get("repos", {}).get(self.path, {})
             unpushed = core.get_unpushed_count(self.path)
-            return entry, unpushed
+            pending = core.has_pending_changes(self.path)
+            return entry, unpushed, pending
 
         def done(result):
             if isinstance(result, Exception):
+                self.pending_badge.configure(text="erro", fg_color="#8a2c2c")
                 self.badge.configure(text="erro", fg_color="#8a2c2c")
                 return
-            entry, unpushed = result
+            entry, unpushed, pending = result
             self.last_push_lbl.configure(text=f"ultimo push: {human_relative(entry.get('lastPush'))}")
+
+            if pending:
+                self.pending_badge.configure(text="alteracao pendente", fg_color="#a67c1a")
+            else:
+                self.pending_badge.configure(text="sem alteracao", fg_color="#2f7a3d")
+
             if unpushed is None:
                 self.badge.configure(text="sem remoto", fg_color="gray40")
             elif unpushed == 0:

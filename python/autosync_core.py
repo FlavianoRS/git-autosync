@@ -277,6 +277,12 @@ def push_all():
     return status
 
 
+def has_pending_changes(repo_path):
+    """True if the working tree has uncommitted changes (git status --porcelain)."""
+    status = _run(["git", "status", "--porcelain"], cwd=repo_path)
+    return bool(status.stdout.strip())
+
+
 def get_unpushed_count(repo_path):
     """Number of local commits not yet on the upstream branch, or None if the
     branch has no upstream configured."""
