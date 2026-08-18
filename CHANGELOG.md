@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.7.0
+
+- **Revisar/editar a mensagem gerada antes de commitar (e antes do push)**:
+  - GUI: **Commitar**/**Sincronizar** agora abrem um diálogo que já mostra a
+    mensagem gerada (via IA/fallback) pronta pra editar — confirma pra
+    commitar (e enviar, no caso do Sincronizar) com o texto final; cancelar
+    desfaz o staging, sem commitar nada.
+  - CLI: `commit --review` / `sync --review` — mostra a mensagem gerada e
+    pergunta `[S] usar essa` `[E] editar` `[C] cancelar` no terminal (exige
+    terminal interativo; não combina com `--all`/`--message`).
+  - Novo em `autosync_core.py`: `stage_and_generate_message()` (stage +
+    gera, sem commitar), `finalize_commit()`/`finalize_sync()` (commita o
+    que já foi revisado, com ou sem push) e `unstage()` (desfaz ao
+    cancelar).
+
 ## 3.6.0
 
 - **Mensagem de commit customizada** (commit/sync individuais, GUI e CLI) —

@@ -76,9 +76,11 @@ Sidebar com:
   horário do último push, botões **Commitar**/**Push**/**Sincronizar**
   individuais (cada um agindo só naquele repositório), e uma seta pra
   expandir e ver as últimas mensagens de commit geradas. **Commitar** e
-  **Sincronizar** abrem um diálogo pra digitar a mensagem do commit — deixe
-  vazio pra gerar automaticamente (via IA, com fallback se não tiver). Cards
-  que vieram de uma pasta `root` mostram "via pasta: `<caminho>`" e, no lugar
+  **Sincronizar** abrem um diálogo que já mostra a mensagem gerada
+  automaticamente (via IA, com fallback se não tiver) — revise, edite se
+  quiser, e só então confirme; cancelar desfaz o que já tinha sido staged,
+  sem commitar nada. Cards que vieram de uma pasta `root` mostram "via
+  pasta: `<caminho>`" e, no lugar
   de Ativar/Desativar/Remover, têm um botão **"Ignorar"** — tira só aquele
   repositório da varredura do root (equivalente ao `exclude` do CLI), sem
   apagar nada do disco nem remover a pasta-raiz inteira. No topo, "Commitar
@@ -140,15 +142,20 @@ python app.py sync --all                    # ou ignore o diretorio atual e rode
 
 python app.py commit -m "fix: ajuste manual"   # mensagem customizada, no lugar da gerada automaticamente
 python app.py sync -m "feat: nova tela"        # idem, pro commit dentro do sync
+
+python app.py commit --review   # mostra a mensagem gerada, deixa usar/editar/cancelar antes de commitar
+python app.py sync --review     # idem, e só dá push depois de confirmar
 ```
 
-`--repo` e `--all` são mutuamente exclusivos. `-m`/`--message` não pode ser
-usado com `--all` (uma mensagem só não serve pra vários repositórios de uma
-vez) — sem `-m`, a mensagem é gerada automaticamente (via IA, com fallback se
-não tiver). `push`/`sync` verificam se o remoto está acessível antes de dar
-push (ou antes de commitar, no caso do `sync`) — se não estiver, perguntam
-`[T] tentar novamente` / `[C]` no terminal (cancelar o push, ou seguir só
-commitando, dependendo do comando).
+`--repo` e `--all` são mutuamente exclusivos. `-m`/`--message` e `--review`
+não podem ser usados com `--all` (uma mensagem/revisão só não serve pra
+vários repositórios de uma vez), e são mutuamente exclusivos entre si.
+`--review` precisa de terminal interativo. Sem `-m`/`--review`, a mensagem é
+gerada automaticamente (via IA, com fallback se não tiver). `push`/`sync`
+verificam se o remoto está acessível antes de dar push (ou antes de
+commitar, no caso do `sync`) — se não estiver, perguntam `[T] tentar
+novamente` / `[C]` no terminal (cancelar o push, ou seguir só commitando,
+dependendo do comando).
 
 Se instalou o componente CLI pelo `installer/install.py`, esses comandos ficam
 disponíveis como `git-autosync commit|push|sync` de qualquer lugar do terminal
