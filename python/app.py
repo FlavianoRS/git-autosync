@@ -155,11 +155,15 @@ def _print_batch_result(status):
 
 def cmd_commit(args):
     if args.all:
+        if args.message:
+            print("--message nao pode ser usado com --all (uma mensagem so nao serve pra varios repos).",
+                  file=sys.stderr)
+            sys.exit(1)
         print("Verificando e commitando (sem push) em todos os alvos configurados...")
         _print_batch_result(core.commit_all())
         return
     path = _resolve_repo_arg(args.repo)
-    r = core.commit_repo(path)
+    r = core.commit_repo(path, message=args.message)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -177,11 +181,15 @@ def cmd_push(args):
 
 def cmd_sync(args):
     if args.all:
+        if args.message:
+            print("--message nao pode ser usado com --all (uma mensagem so nao serve pra varios repos).",
+                  file=sys.stderr)
+            sys.exit(1)
         print("Rodando sync (commit + push) em todos os alvos configurados...")
         _print_batch_result(core.run_all(push_decider=_cli_sync_decider))
         return
     path = _resolve_repo_arg(args.repo)
-    r = core.sync_repo(path, push_decider=_cli_sync_decider)
+    r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -408,6 +416,8 @@ def build_parser():
     g = p.add_mutually_exclusive_group()
     g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
     g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
+    p.add_argument("-m", "--message", help="mensagem customizada (sem isso, gera automaticamente via IA); "
+                                            "nao pode ser usado com --all")
     p.set_defaults(func=cmd_commit)
 
     p = sub.add_parser("push", help="da push do que ja foi commitado (o repo atual por padrao)")
@@ -420,6 +430,8 @@ def build_parser():
     g = p.add_mutually_exclusive_group()
     g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
     g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
+    p.add_argument("-m", "--message", help="mensagem customizada (sem isso, gera automaticamente via IA); "
+                                            "nao pode ser usado com --all")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("history")

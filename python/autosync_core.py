@@ -159,9 +159,14 @@ def include_repo_in_root(root_path, repo_path):
     return False
 
 
-def commit_repo(repo_path):
+def commit_repo(repo_path, message=None):
     """Stages and commits pending changes (no push). Returns dict: path, time,
-    success, hadChanges, message, commitHash."""
+    success, hadChanges, message, commitHash.
+
+    message: mensagem customizada pro commit - quando informada, pula a
+    geracao automatica (diff + claude/fallback) e usa ela direto. Pensado
+    pra acao individual (GUI/CLI de um repo so); commit_all() nao aceita,
+    ja que uma mensagem so nao faz sentido pra varios repos de uma vez."""
     result = {
         "path": repo_path,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -187,33 +192,36 @@ def commit_repo(repo_path):
         result["hadChanges"] = True
         _run(["git", "add", "-A"], cwd=repo_path)
 
-        diff = _run(["git", "diff", "--staged"], cwd=repo_path).stdout
-        if len(diff) > 12000:
-            diff = diff[:12000] + "\n...(diff truncado)..."
+        if message:
+            commit_msg = message
+        else:
+            diff = _run(["git", "diff", "--staged"], cwd=repo_path).stdout
+            if len(diff) > 12000:
+                diff = diff[:12000] + "\n...(diff truncado)..."
 
-        prompt = (
-            "Gere APENAS uma mensagem de commit no padrao Conventional Commits "
-            "(feat:, fix:, chore:, docs:, refactor:, etc), em portugues, uma linha, "
-            "maximo 72 caracteres, baseada no diff abaixo. Responda SOMENTE com a "
-            f"mensagem, sem aspas, sem explicacao, sem markdown.\n\n{diff}"
-        )
+            prompt = (
+                "Gere APENAS uma mensagem de commit no padrao Conventional Commits "
+                "(feat:, fix:, chore:, docs:, refactor:, etc), em portugues, uma linha, "
+                "maximo 72 caracteres, baseada no diff abaixo. Responda SOMENTE com a "
+                f"mensagem, sem aspas, sem explicacao, sem markdown.\n\n{diff}"
+            )
 
-        commit_msg = None
-        claude_bin = shutil.which("claude")
-        if claude_bin:
-            try:
-                proc = _run(
-                    [claude_bin, "-p", prompt, "--output-format", "text",
-                     "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch"],
-                    cwd=repo_path, timeout=120,
-                )
-                commit_msg = proc.stdout.strip()
-            except Exception:
-                commit_msg = None
+            commit_msg = None
+            claude_bin = shutil.which("claude")
+            if claude_bin:
+                try:
+                    proc = _run(
+                        [claude_bin, "-p", prompt, "--output-format", "text",
+                         "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch"],
+                        cwd=repo_path, timeout=120,
+                    )
+                    commit_msg = proc.stdout.strip()
+                except Exception:
+                    commit_msg = None
 
-        if not commit_msg:
-            commit_msg = f"chore: auto-commit {datetime.now():%Y-%m-%d %H:%M}"
-            write_log(repo_path, "aviso: claude nao retornou mensagem, usando fallback.")
+            if not commit_msg:
+                commit_msg = f"chore: auto-commit {datetime.now():%Y-%m-%d %H:%M}"
+                write_log(repo_path, "aviso: claude nao retornou mensagem, usando fallback.")
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
             tmp.write(commit_msg)
@@ -373,19 +381,20 @@ def push_repo_checked(repo_path, push_decider=None):
     return push_repo(repo_path)
 
 
-def sync_repo(repo_path, push_decider=None):
+def sync_repo(repo_path, push_decider=None, message=None):
     """Commit followed by push — used pela tarefa agendada e pelo comando
     `sync`. Returns dict: path, time, success, hadChanges, message.
 
     Antes de commitar, verifica se o remoto esta acessivel (ver
     _resolve_push_availability) - se nao estiver e ninguem topar tentar de
-    novo, segue so commitando, sem dar push nessa rodada."""
+    novo, segue so commitando, sem dar push nessa rodada. `message` (ver
+    commit_repo) so faz sentido pra chamada de um repo so."""
     proceed, _ = _resolve_push_availability(repo_path, push_decider)
     skip_push = not proceed
     if skip_push:
         write_log(repo_path, "aviso: remoto inacessivel, commitando sem dar push nesta rodada.")
 
-    commit_result = commit_repo(repo_path)
+    commit_result = commit_repo(repo_path, message=message)
     if not commit_result["success"] or not commit_result["hadChanges"] or skip_push:
         result = {k: commit_result[k] for k in ("path", "time", "success", "hadChanges", "message")}
         result["pushed"] = False
