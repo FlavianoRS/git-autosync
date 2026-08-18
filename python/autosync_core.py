@@ -78,19 +78,41 @@ def _run(args, cwd=None, timeout=None):
 
 
 def resolve_targets(targets):
-    paths = []
+    return [d["path"] for d in resolve_targets_detailed(targets)]
+
+
+def resolve_targets_detailed(targets, skip_disabled=True):
+    """Como resolve_targets(), mas devolve um dict por repositorio real com
+    sourceType/sourcePath/enabled - usado pela GUI pra saber se um repo veio
+    de um alvo 'repo' direto (editavel/removivel individualmente) ou de
+    dentro de um alvo 'root' (herdado - quem controla e a pasta-raiz, nao o
+    repo). skip_disabled=False inclui tambem os alvos desativados (a GUI
+    precisa disso pra mostrar o botao "Ativar"; commit_all/push_all/run_all
+    usam o default, que so considera os habilitados)."""
+    resolved = []
     for t in targets:
-        if not t.get("enabled", True):
+        enabled = t.get("enabled", True)
+        if skip_disabled and not enabled:
             continue
         p = Path(t["path"])
         if t.get("type") == "root":
             if p.is_dir():
                 for child in sorted(p.iterdir()):
                     if child.is_dir() and (child / ".git").exists():
-                        paths.append(str(child))
+                        resolved.append({
+                            "path": str(child),
+                            "sourceType": "root",
+                            "sourcePath": str(p),
+                            "enabled": enabled,
+                        })
         else:
-            paths.append(str(p))
-    return paths
+            resolved.append({
+                "path": str(p),
+                "sourceType": "repo",
+                "sourcePath": str(p),
+                "enabled": enabled,
+            })
+    return resolved
 
 
 def commit_repo(repo_path):
@@ -259,35 +281,65 @@ def check_remote_reachable(repo_path, timeout=8):
     return result.returncode == 0
 
 
-def sync_repo(repo_path, push_decider=None):
-    """Commit followed by push — used pela tarefa agendada, `run-now` e o
-    comando ad-hoc `sync`. Returns dict: path, time, success, hadChanges,
-    message.
+def _resolve_push_availability(repo_path, push_decider):
+    """Checa se da pra tentar um push agora, com retry opcional.
 
-    Antes de commitar, verifica se o remoto esta acessivel. Se nao estiver:
-    - push_decider(repo_path) e chamado (quando informado) - deve retornar
-      True pra tentar de novo (reverifica a conexao) ou False pra seguir
-      commitando sem tentar dar push nessa rodada.
+    Retorna (proceed, reachable). `reachable` e o resultado mais recente de
+    check_remote_reachable() (True/False/None). `proceed` e False so quando
+    o remoto esta configurado e inacessivel E quem decide (push_decider, ou
+    o retry automatico sem decider) desistiu.
+
+    - push_decider(repo_path), quando informado, e chamado a cada tentativa
+      falha - deve retornar True pra tentar de novo (reverifica a conexao)
+      ou False pra desistir.
     - sem push_decider (uso nao interativo, ex: tarefa agendada), tenta de
-      novo silenciosamente algumas vezes e, se continuar sem acesso, segue
-      so commitando - nunca fica esperando input pra sempre."""
-    skip_push = False
+      novo silenciosamente algumas vezes e desiste se continuar sem acesso -
+      nunca fica esperando input pra sempre."""
     reachable = check_remote_reachable(repo_path)
-    if reachable is False:
-        if push_decider is not None:
-            while reachable is False and push_decider(repo_path):
-                reachable = check_remote_reachable(repo_path)
-            if reachable is False:
-                skip_push = True
-        else:
-            for _ in range(2):
-                time.sleep(2)
-                reachable = check_remote_reachable(repo_path)
-                if reachable is not False:
-                    break
-            if reachable is False:
-                skip_push = True
-                write_log(repo_path, "aviso: remoto inacessivel, commitando sem dar push nesta rodada.")
+    if reachable is not False:
+        return True, reachable
+
+    if push_decider is not None:
+        while reachable is False and push_decider(repo_path):
+            reachable = check_remote_reachable(repo_path)
+    else:
+        for _ in range(2):
+            time.sleep(2)
+            reachable = check_remote_reachable(repo_path)
+            if reachable is not False:
+                break
+
+    return reachable is not False, reachable
+
+
+def push_repo_checked(repo_path, push_decider=None):
+    """Como push_repo(), mas primeiro verifica se o remoto esta acessivel
+    (ver _resolve_push_availability) - evita disparar um `git push` que ja
+    se sabe de antemao que vai falhar, e da chance de tentar de novo antes
+    de desistir. Mesmo formato de retorno de push_repo()."""
+    proceed, _ = _resolve_push_availability(repo_path, push_decider)
+    if not proceed:
+        write_log(repo_path, "aviso: push cancelado, remoto inacessivel.")
+        return {
+            "path": repo_path,
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "success": False,
+            "message": "push cancelado (remoto inacessivel)",
+        }
+    return push_repo(repo_path)
+
+
+def sync_repo(repo_path, push_decider=None):
+    """Commit followed by push — used pela tarefa agendada e pelo comando
+    `sync`. Returns dict: path, time, success, hadChanges, message.
+
+    Antes de commitar, verifica se o remoto esta acessivel (ver
+    _resolve_push_availability) - se nao estiver e ninguem topar tentar de
+    novo, segue so commitando, sem dar push nessa rodada."""
+    proceed, _ = _resolve_push_availability(repo_path, push_decider)
+    skip_push = not proceed
+    if skip_push:
+        write_log(repo_path, "aviso: remoto inacessivel, commitando sem dar push nesta rodada.")
 
     commit_result = commit_repo(repo_path)
     if not commit_result["success"] or not commit_result["hadChanges"] or skip_push:
@@ -353,14 +405,15 @@ def commit_all():
     return status
 
 
-def push_all():
+def push_all(push_decider=None):
     """Push-only pass over every enabled target — used by the manual
-    'Push tudo' action in the GUI/CLI."""
+    'Push tudo' action in the GUI/CLI. Ver push_repo_checked() pro que
+    push_decider faz."""
     cfg = load_config()
     paths = resolve_targets(cfg.get("targets", []))
     status = load_status()
     for p in paths:
-        r = push_repo(p)
+        r = push_repo_checked(p, push_decider=push_decider)
         if r["success"]:
             _update_status_entry(status, p, lastPush=r["time"], message=r["message"])
         else:
