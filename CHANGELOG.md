@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.5.1
+
+- **Fix**: botão "Excluir da pasta" (GUI) não fazia nada quando o `path` do
+  alvo `root` no `config.json` usava `/` em vez de `\` — comparação de
+  string exata nunca dava match. `exclude_repo_from_root`/
+  `include_repo_in_root` agora comparam via `Path(...) == Path(...)`.
+
 ## 3.5.0
 
 - **Exclusão de repositórios dentro de um alvo `root`**: até aqui, um alvo
