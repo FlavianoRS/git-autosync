@@ -237,13 +237,12 @@ def run_gui():
 
 def run_tray():
     import pystray
-    from PIL import Image, ImageDraw
+    from assets.generate_icon import draw_sync_glyph
 
     def make_icon(color):
-        img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        d = ImageDraw.Draw(img)
-        d.ellipse((4, 4, 60, 60), fill=color, outline=(0, 0, 0, 255), width=2)
-        return img
+        # mesmo desenho do icone.ico da area de trabalho, so com o fundo na
+        # cor que indica o status atual (verde/vermelho/amarelo/cinza).
+        return draw_sync_glyph(size=64, bg=color)
 
     icons = {
         "ok": make_icon((34, 139, 34, 255)),

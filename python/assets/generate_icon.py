@@ -17,12 +17,16 @@ BG = (37, 99, 235, 255)      # azul solido (combina com o tema padrao do customt
 FG = (255, 255, 255, 255)    # branco
 
 
-def draw_sync_glyph(size=SIZE):
+def draw_sync_glyph(size=SIZE, bg=BG, fg=FG):
+    """Circulo + duas flechas em arco (simbolo de sync). Usado tanto pro icone
+    fixo do projeto (bg azul) quanto pelos icones de status da bandeja do
+    sistema (app.py:run_tray, bg verde/vermelho/amarelo/cinza) - mesmo desenho,
+    so a cor de fundo muda."""
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
 
     margin = size * 0.06
-    d.ellipse([margin, margin, size - margin, size - margin], fill=BG)
+    d.ellipse([margin, margin, size - margin, size - margin], fill=bg)
 
     cx = cy = size / 2
     r = size * 0.30
@@ -31,8 +35,8 @@ def draw_sync_glyph(size=SIZE):
 
     # dois arcos de 140 graus, opostos, com folga entre eles -> le como duas
     # flechas girando (simbolo classico de "sync"/"refresh").
-    d.arc(box, start=20, end=160, fill=FG, width=int(stroke))
-    d.arc(box, start=200, end=340, fill=FG, width=int(stroke))
+    d.arc(box, start=20, end=160, fill=fg, width=int(stroke))
+    d.arc(box, start=200, end=340, fill=fg, width=int(stroke))
 
     head_len = stroke * 2.0
     head_half_width = stroke * 1.05
@@ -48,7 +52,7 @@ def draw_sync_glyph(size=SIZE):
         tip = (px + head_len * tx, py + head_len * ty)
         base1 = (px + head_half_width * rx, py + head_half_width * ry)
         base2 = (px - head_half_width * rx, py - head_half_width * ry)
-        d.polygon([tip, base1, base2], fill=FG)
+        d.polygon([tip, base1, base2], fill=fg)
 
     arrow_head(160)
     arrow_head(340)
