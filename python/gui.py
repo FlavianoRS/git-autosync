@@ -278,6 +278,9 @@ class RepoCard(ctk.CTkFrame):
                 self.toggle_btn.pack(side="left", padx=(0, 6))
                 ctk.CTkButton(actions, text="Remover", width=80, fg_color="#8a2c2c", hover_color="#6f2323",
                               command=self._remove).pack(side="left", padx=(0, 6))
+            else:
+                ctk.CTkButton(actions, text="Excluir da pasta", width=120, fg_color="#8a2c2c",
+                              hover_color="#6f2323", command=self._exclude_from_root).pack(side="left", padx=(0, 6))
 
         self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=120, fg_color="transparent",
                                          text_color=("gray20", "gray80"), hover_color=("gray85", "gray30"),
@@ -389,6 +392,13 @@ class RepoCard(ctk.CTkFrame):
         cfg = core.load_config()
         cfg["targets"] = [t for t in cfg["targets"] if t["path"] != self.path]
         core.save_config(cfg)
+        self.on_changed()
+
+    def _exclude_from_root(self):
+        if not messagebox.askyesno("Confirmar", f"Excluir {self.path} da pasta {self.source_path}?\n"
+                                                  f"O autosync para de considerar esse repositorio."):
+            return
+        core.exclude_repo_from_root(self.source_path, self.path)
         self.on_changed()
 
 

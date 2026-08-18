@@ -57,6 +57,8 @@ def cmd_list(args):
         tag = "ROOT (varre subpastas git)" if t.get("type") == "root" else "REPO"
         en = "ativo" if t.get("enabled", True) else "desativado"
         print(f"  {i}. [{tag}][{en}] {t['path']}")
+        for excl in t.get("exclude", []):
+            print(f"       excluido: {excl}")
 
 
 def cmd_add(args):
@@ -83,6 +85,26 @@ def cmd_remove(args):
         print("Nenhum alvo encontrado com esse caminho.")
     else:
         print(f"Removido: {target_path}")
+
+
+def cmd_exclude(args):
+    repo_path = str(Path(args.path).resolve())
+    root_path = core.find_owning_root(repo_path)
+    if not root_path:
+        print(f"Nenhum alvo tipo root tem {repo_path} como subpasta direta.", file=sys.stderr)
+        sys.exit(1)
+    core.exclude_repo_from_root(root_path, repo_path)
+    print(f"Excluido de '{root_path}': {repo_path}")
+
+
+def cmd_include(args):
+    repo_path = str(Path(args.path).resolve())
+    root_path = core.find_owning_root(repo_path)
+    if not root_path:
+        print(f"Nenhum alvo tipo root tem {repo_path} como subpasta direta.", file=sys.stderr)
+        sys.exit(1)
+    core.include_repo_in_root(root_path, repo_path)
+    print(f"Removido da exclusao de '{root_path}': {repo_path}")
 
 
 def cmd_set_schedule(args):
@@ -369,6 +391,14 @@ def build_parser():
     p = sub.add_parser("remove")
     p.add_argument("path")
     p.set_defaults(func=cmd_remove)
+
+    p = sub.add_parser("exclude", help="exclui um repo de dentro de um alvo tipo root")
+    p.add_argument("path", help="caminho do repositorio (subpasta direta de um alvo root)")
+    p.set_defaults(func=cmd_exclude)
+
+    p = sub.add_parser("include", help="desfaz um exclude anterior")
+    p.add_argument("path", help="caminho do repositorio (subpasta direta de um alvo root)")
+    p.set_defaults(func=cmd_include)
 
     p = sub.add_parser("set-schedule")
     p.add_argument("times", help='ex: "12:00,17:30"')

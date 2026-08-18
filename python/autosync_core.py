@@ -96,8 +96,11 @@ def resolve_targets_detailed(targets, skip_disabled=True):
             continue
         p = Path(t["path"])
         if t.get("type") == "root":
+            excluded = set(t.get("exclude", []))
             if p.is_dir():
                 for child in sorted(p.iterdir()):
+                    if str(child) in excluded:
+                        continue
                     if child.is_dir() and (child / ".git").exists():
                         resolved.append({
                             "path": str(child),
@@ -113,6 +116,45 @@ def resolve_targets_detailed(targets, skip_disabled=True):
                 "enabled": enabled,
             })
     return resolved
+
+
+def find_owning_root(root_or_repo_path):
+    """Acha o alvo tipo 'root' que e pai direto de root_or_repo_path (usado
+    pra excluir/incluir um repo especifico de dentro de uma pasta-raiz)."""
+    cfg = load_config()
+    p = Path(root_or_repo_path).resolve()
+    for t in cfg.get("targets", []):
+        if t.get("type") == "root" and Path(t["path"]).resolve() == p.parent:
+            return t["path"]
+    return None
+
+
+def exclude_repo_from_root(root_path, repo_path):
+    """Adiciona repo_path na lista de exclusao do alvo root em root_path -
+    resolve_targets_detailed() passa a pular esse repo. Nao afeta o
+    repositorio em si, so o que o autosync considera dentro daquela pasta."""
+    cfg = load_config()
+    for t in cfg["targets"]:
+        if t.get("type") == "root" and t["path"] == root_path:
+            excluded = t.setdefault("exclude", [])
+            if repo_path not in excluded:
+                excluded.append(repo_path)
+            save_config(cfg)
+            return True
+    return False
+
+
+def include_repo_in_root(root_path, repo_path):
+    """Desfaz exclude_repo_from_root()."""
+    cfg = load_config()
+    for t in cfg["targets"]:
+        if t.get("type") == "root" and t["path"] == root_path:
+            excluded = t.get("exclude", [])
+            if repo_path in excluded:
+                excluded.remove(repo_path)
+                save_config(cfg)
+            return True
+    return False
 
 
 def commit_repo(repo_path):
