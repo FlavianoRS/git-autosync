@@ -24,6 +24,7 @@ VERSION = (PYTHON_DIR / "VERSION").read_text(encoding="utf-8").strip()
 
 STATE_DIR = Path.home() / ".git-autosync"
 VENV_DIR = STATE_DIR / "venv"
+BIN_DIR = STATE_DIR / "bin"
 
 SKILL_FILES = [
     "app.py", "autosync_core.py", "gui.py", "gui_launcher.pyw", "run_sync.py",
@@ -97,6 +98,8 @@ def pip_install_requirements():
 # ---------------- atalho (Windows .lnk / Linux .desktop) ----------------
 
 def create_shortcut(launcher):
+    icon_ico = PYTHON_DIR / "assets" / "icon.ico"
+    icon_png = PYTHON_DIR / "assets" / "icon.png"
     try:
         if IS_WINDOWS:
             pythonw = venv_pythonw(VENV_DIR)
@@ -106,10 +109,12 @@ def create_shortcut(launcher):
                 '$sc.TargetPath = $env:GAS_PYTHONW\n'
                 '$sc.Arguments = \'"\' + $env:GAS_LAUNCHER + \'"\'\n'
                 '$sc.WorkingDirectory = Split-Path $env:GAS_LAUNCHER\n'
+                'if ($env:GAS_ICON) { $sc.IconLocation = $env:GAS_ICON }\n'
                 '$sc.Save()\n'
             )
             env = {**os.environ, "GAS_LNK": str(lnk_path), "GAS_PYTHONW": str(pythonw),
-                    "GAS_LAUNCHER": str(launcher)}
+                    "GAS_LAUNCHER": str(launcher),
+                    "GAS_ICON": str(icon_ico) if icon_ico.exists() else ""}
             subprocess.run(["powershell", "-NoProfile", "-Command", ps_script],
                             check=True, capture_output=True, text=True, env=env)
             print(f"  Atalho criado: {lnk_path}")
@@ -117,14 +122,64 @@ def create_shortcut(launcher):
             apps_dir = Path.home() / ".local" / "share" / "applications"
             apps_dir.mkdir(parents=True, exist_ok=True)
             desktop_file = apps_dir / "git-autosync.desktop"
+            icon_line = f"Icon={icon_png}\n" if icon_png.exists() else ""
             desktop_file.write_text(
                 "[Desktop Entry]\nType=Application\nName=Git AutoSync\n"
-                f"Exec={venv_python(VENV_DIR)} {launcher}\nTerminal=false\n",
+                f"Exec={venv_python(VENV_DIR)} {launcher}\nTerminal=false\n{icon_line}",
                 encoding="utf-8",
             )
             print(f"  Atalho criado: {desktop_file}")
     except Exception as exc:
         print(f"  (aviso) nao consegui criar o atalho automatico: {exc}")
+
+
+# ---------------- comando global 'git-autosync' ----------------
+
+def create_cli_shim(py):
+    """Cria um lancador chamado 'git-autosync' (nao 'app.py') pra rodar de
+    dentro de qualquer repositorio: git-autosync commit|push|sync [--repo X]."""
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    app_py = PYTHON_DIR / "app.py"
+    if IS_WINDOWS:
+        shim = BIN_DIR / "git-autosync.bat"
+        shim.write_text(f'@echo off\r\n"{py}" "{app_py}" %*\r\n', encoding="utf-8")
+    else:
+        shim = BIN_DIR / "git-autosync"
+        shim.write_text(f'#!/usr/bin/env bash\nexec "{py}" "{app_py}" "$@"\n', encoding="utf-8")
+        shim.chmod(shim.stat().st_mode | 0o111)
+    return shim
+
+
+def ensure_on_path(bin_dir):
+    if IS_WINDOWS:
+        current = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "[Environment]::GetEnvironmentVariable('Path','User')"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        entries = [e for e in current.split(";") if e]
+        if str(bin_dir) in entries:
+            print(f"  {bin_dir} ja esta no PATH do usuario.")
+            return
+        if not confirm(f"Adicionar {bin_dir} ao PATH (pra chamar 'git-autosync' de qualquer lugar)?",
+                       default_yes=True):
+            print(f"  Ok, PATH nao alterado. Pra usar sem isso, chame o script direto: {bin_dir}\\git-autosync.bat")
+            return
+        new_value = f"{current};{bin_dir}" if current else str(bin_dir)
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "[Environment]::SetEnvironmentVariable('Path', $env:GAS_NEWPATH, 'User')"],
+            check=True, capture_output=True, text=True,
+            env={**os.environ, "GAS_NEWPATH": new_value},
+        )
+        print("  PATH atualizado (variavel de usuario). Abra um terminal novo pra 'git-autosync' funcionar.")
+    else:
+        path_entries = os.environ.get("PATH", "").split(os.pathsep)
+        if str(bin_dir) in path_entries:
+            print(f"  {bin_dir} ja esta no PATH.")
+            return
+        print(f"  Adicione ao seu shell rc (~/.bashrc, ~/.zshrc, etc) e abra um terminal novo:")
+        print(f'    export PATH="{bin_dir}:$PATH"')
 
 
 # ---------------- instalacao por componente ----------------
@@ -152,7 +207,13 @@ def install_cli(components):
     if confirm("Instalar a tarefa agendada agora (so commit+push automatico, sem GUI/tray)?",
                default_yes=default_yes):
         subprocess.run([str(py), str(PYTHON_DIR / "app.py"), "install"], check=False)
-    print(f"\nCLI pronta. Exemplo: \"{py}\" \"{PYTHON_DIR / 'app.py'}\" status")
+
+    create_cli_shim(py)
+    ensure_on_path(BIN_DIR)
+
+    print(f"\nCLI pronta. Dentro de um repositorio: git-autosync commit | push | sync")
+    print(f"Selecionando outro repo: git-autosync commit --repo <caminho>")
+    print(f"(sem o comando no PATH, chame direto: \"{py}\" \"{PYTHON_DIR / 'app.py'}\" status)")
 
 
 def install_skill():
