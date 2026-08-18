@@ -100,7 +100,7 @@ class PushUnavailableDialog(ctk.CTkToplevel):
     inacessivel bem antes de comitar. Bloqueia so a thread de background que
     esta rodando o sync — a janela principal continua responsiva."""
 
-    def __init__(self, master, repo_path, on_choice):
+    def __init__(self, master, repo_path, on_choice, give_up_label="Apenas commit"):
         super().__init__(master)
         self.title("Push indisponivel")
         self.geometry("480x200")
@@ -118,7 +118,7 @@ class PushUnavailableDialog(ctk.CTkToplevel):
         row.pack(pady=8)
         ctk.CTkButton(row, text="Tentar novamente", width=160,
                       command=lambda: self._choose(True)).pack(side="left", padx=6)
-        ctk.CTkButton(row, text="Apenas commit", width=160, fg_color="gray40",
+        ctk.CTkButton(row, text=give_up_label, width=160, fg_color="gray40",
                       command=lambda: self._choose(False)).pack(side="left", padx=6)
 
         self.grab_set()
@@ -128,10 +128,13 @@ class PushUnavailableDialog(ctk.CTkToplevel):
         self.destroy()
 
 
-def make_gui_push_decider(root):
-    """Fabrica um push_decider (ver core.sync_repo) que, quando chamado numa
-    thread de background, pede pro thread principal abrir o
-    PushUnavailableDialog e espera a resposta antes de continuar."""
+def make_gui_push_decider(root, give_up_label="Apenas commit"):
+    """Fabrica um push_decider (ver core.sync_repo/push_repo_checked) que,
+    quando chamado numa thread de background, pede pro thread principal
+    abrir o PushUnavailableDialog e espera a resposta antes de continuar.
+    give_up_label troca o texto do botao de desistir - "Apenas commit" no
+    fluxo de sync (ainda vai commitar), "Cancelar" num push puro (nao ha
+    commit nenhum acontecendo)."""
 
     def decider(repo_path):
         result = {"retry": False}
@@ -141,7 +144,7 @@ def make_gui_push_decider(root):
             result["retry"] = retry
             answered.set()
 
-        root.after(0, lambda: PushUnavailableDialog(root, repo_path, on_choice))
+        root.after(0, lambda: PushUnavailableDialog(root, repo_path, on_choice, give_up_label))
         answered.wait()
         return result["retry"]
 
@@ -226,10 +229,12 @@ class CommitListPanel(ctk.CTkFrame):
 class RepoCard(ctk.CTkFrame):
     """One repository: header (badge/last push/actions) + collapsible commit list."""
 
-    def __init__(self, master, target, root, on_changed, history_mode=False):
+    def __init__(self, master, entry, root, on_changed, history_mode=False):
         super().__init__(master, corner_radius=10, fg_color=("gray95", "gray20"))
-        self.target = target
-        self.path = target["path"]
+        self.entry = entry
+        self.path = entry["path"]
+        self.manageable = entry["sourceType"] == "repo"
+        self.source_path = entry["sourcePath"]
         self.root = root
         self.on_changed = on_changed
         self.history_mode = history_mode
@@ -244,6 +249,9 @@ class RepoCard(ctk.CTkFrame):
         title_box.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(title_box, text=name, font=ctk.CTkFont(weight="bold")).pack(anchor="w")
         ctk.CTkLabel(title_box, text=self.path, text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w")
+        if not self.manageable:
+            ctk.CTkLabel(title_box, text=f"via pasta: {self.source_path}", text_color="gray",
+                         font=ctk.CTkFont(size=11, slant="italic")).pack(anchor="w")
 
         self.pending_badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
                                            text_color="white", padx=10, width=140)
@@ -263,12 +271,13 @@ class RepoCard(ctk.CTkFrame):
             ctk.CTkButton(actions, text="Commitar", width=90, command=self._commit).pack(side="left", padx=(0, 6))
             ctk.CTkButton(actions, text="Push", width=70, command=self._push).pack(side="left", padx=(0, 6))
             ctk.CTkButton(actions, text="Sincronizar", width=100, command=self._sync).pack(side="left", padx=(0, 6))
-            enabled = target.get("enabled", True)
-            self.toggle_btn = ctk.CTkButton(actions, text="Desativar" if enabled else "Ativar", width=90,
-                                             fg_color="gray50", command=self._toggle_enabled)
-            self.toggle_btn.pack(side="left", padx=(0, 6))
-            ctk.CTkButton(actions, text="Remover", width=80, fg_color="#8a2c2c", hover_color="#6f2323",
-                          command=self._remove).pack(side="left", padx=(0, 6))
+            if self.manageable:
+                enabled = entry.get("enabled", True)
+                self.toggle_btn = ctk.CTkButton(actions, text="Desativar" if enabled else "Ativar", width=90,
+                                                 fg_color="gray50", command=self._toggle_enabled)
+                self.toggle_btn.pack(side="left", padx=(0, 6))
+                ctk.CTkButton(actions, text="Remover", width=80, fg_color="#8a2c2c", hover_color="#6f2323",
+                              command=self._remove).pack(side="left", padx=(0, 6))
 
         self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=120, fg_color="transparent",
                                          text_color=("gray20", "gray80"), hover_color=("gray85", "gray30"),
@@ -352,10 +361,11 @@ class RepoCard(ctk.CTkFrame):
         run_bg(lambda: core.commit_repo(self.path), lambda r: self._after_action(r), self.root)
 
     def _push(self):
-        run_bg(lambda: core.push_repo(self.path), lambda r: self._after_action(r), self.root)
+        decider = make_gui_push_decider(self.root, give_up_label="Cancelar")
+        run_bg(lambda: core.push_repo_checked(self.path, push_decider=decider), lambda r: self._after_action(r), self.root)
 
     def _sync(self):
-        decider = make_gui_push_decider(self.root)
+        decider = make_gui_push_decider(self.root, give_up_label="Apenas commit")
         run_bg(lambda: core.sync_repo(self.path, push_decider=decider), lambda r: self._after_action(r), self.root)
 
     def _after_action(self, result):
@@ -472,27 +482,28 @@ class App(ctk.CTk):
         ctk.CTkButton(btns, text="Atualizar", fg_color="gray40", command=self.show_status).pack(side="left", padx=4)
 
         cfg = core.load_config()
-        targets = cfg.get("targets", [])
+        entries = core.resolve_targets_detailed(cfg.get("targets", []), skip_disabled=False)
         scroll = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        if not targets:
+        if not entries:
             ctk.CTkLabel(scroll, text="Nenhum repositorio configurado ainda. Use '+ Adicionar repositorio'.",
                          text_color="gray").pack(pady=20)
             return
 
-        for t in targets:
-            card = RepoCard(scroll, t, self, on_changed=self.show_status)
+        for e in entries:
+            card = RepoCard(scroll, e, self, on_changed=self.show_status)
             card.pack(fill="x", pady=6)
 
     def _commit_all(self):
         self._run_global_action(core.commit_all, "Commit em lote concluido.")
 
     def _push_all(self):
-        self._run_global_action(core.push_all, "Push em lote concluido.")
+        decider = make_gui_push_decider(self, give_up_label="Cancelar")
+        self._run_global_action(lambda: core.push_all(push_decider=decider), "Push em lote concluido.")
 
     def _sync_all(self):
-        decider = make_gui_push_decider(self)
+        decider = make_gui_push_decider(self, give_up_label="Apenas commit")
         self._run_global_action(lambda: core.run_all(push_decider=decider), "Sincronizacao em lote concluida.")
 
     def _run_global_action(self, fn, done_message):
@@ -528,16 +539,16 @@ class App(ctk.CTk):
                           command=on_period_change, width=120).pack(side="right")
 
         cfg = core.load_config()
-        targets = cfg.get("targets", [])
+        entries = core.resolve_targets_detailed(cfg.get("targets", []), skip_disabled=False)
         scroll = ctk.CTkScrollableFrame(self.content, fg_color="transparent")
         scroll.pack(fill="both", expand=True)
 
-        if not targets:
+        if not entries:
             ctk.CTkLabel(scroll, text="Nenhum repositorio configurado ainda.", text_color="gray").pack(pady=20)
             return
 
-        for t in targets:
-            card = RepoCard(scroll, t, self, on_changed=self.show_history, history_mode=True)
+        for e in entries:
+            card = RepoCard(scroll, e, self, on_changed=self.show_history, history_mode=True)
             card.pack(fill="x", pady=6)
             cards.append(card)
 
