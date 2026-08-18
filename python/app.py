@@ -153,17 +153,67 @@ def _print_batch_result(status):
         print(f"{tag} {path}: {r.get('message', '')}")
 
 
+def _review_message_prompt(repo_path, generated):
+    """Mostra a mensagem gerada e deixa usar/editar/cancelar. Retorna a
+    mensagem final, ou None se cancelado (inclusive se o input acabar sem
+    resposta - EOF, terminal fechado no meio, etc)."""
+    print(f"\nMensagem gerada para {repo_path}:\n  {generated}\n")
+    try:
+        while True:
+            choice = input("[S] usar essa  [E] editar  [C] cancelar: ").strip().lower()
+            if choice == "s":
+                return generated
+            if choice == "e":
+                edited = input("Nova mensagem: ").strip()
+                if edited:
+                    return edited
+                print("Mensagem vazia, tente de novo.")
+                continue
+            if choice == "c":
+                return None
+            print("Resposta invalida, digite S, E ou C.")
+    except EOFError:
+        print("\nSem resposta, cancelando.")
+        return None
+
+
+def _check_review_args(args):
+    if args.all and (args.message or args.review):
+        print("--message/--review nao pode ser usado com --all (nao serve pra varios repos de uma vez).",
+              file=sys.stderr)
+        sys.exit(1)
+    if args.message and args.review:
+        print("--message e --review sao mutuamente exclusivos.", file=sys.stderr)
+        sys.exit(1)
+    if args.review and not sys.stdin.isatty():
+        print("--review precisa de terminal interativo.", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_commit(args):
+    _check_review_args(args)
     if args.all:
-        if args.message:
-            print("--message nao pode ser usado com --all (uma mensagem so nao serve pra varios repos).",
-                  file=sys.stderr)
-            sys.exit(1)
         print("Verificando e commitando (sem push) em todos os alvos configurados...")
         _print_batch_result(core.commit_all())
         return
+
     path = _resolve_repo_arg(args.repo)
-    r = core.commit_repo(path, message=args.message)
+    if args.review:
+        staged = core.stage_and_generate_message(path)
+        if staged["error"]:
+            print(f"[ERRO] {path}: {staged['error']}")
+            return
+        if not staged["hadChanges"]:
+            print(f"[OK] {path}: sem alteracoes, nada a fazer")
+            return
+        message = _review_message_prompt(path, staged["message"])
+        if message is None:
+            core.unstage(path)
+            print(f"Cancelado, nada commitado em {path}.")
+            return
+        r = core.finalize_commit(path, message)
+    else:
+        r = core.commit_repo(path, message=args.message)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -180,16 +230,29 @@ def cmd_push(args):
 
 
 def cmd_sync(args):
+    _check_review_args(args)
     if args.all:
-        if args.message:
-            print("--message nao pode ser usado com --all (uma mensagem so nao serve pra varios repos).",
-                  file=sys.stderr)
-            sys.exit(1)
         print("Rodando sync (commit + push) em todos os alvos configurados...")
         _print_batch_result(core.run_all(push_decider=_cli_sync_decider))
         return
+
     path = _resolve_repo_arg(args.repo)
-    r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message)
+    if args.review:
+        staged = core.stage_and_generate_message(path)
+        if staged["error"]:
+            print(f"[ERRO] {path}: {staged['error']}")
+            return
+        if not staged["hadChanges"]:
+            print(f"[OK] {path}: sem alteracoes, nada a fazer")
+            return
+        message = _review_message_prompt(path, staged["message"])
+        if message is None:
+            core.unstage(path)
+            print(f"Cancelado, nada commitado/enviado em {path}.")
+            return
+        r = core.finalize_sync(path, message, push_decider=_cli_sync_decider)
+    else:
+        r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -417,7 +480,10 @@ def build_parser():
     g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
     g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
     p.add_argument("-m", "--message", help="mensagem customizada (sem isso, gera automaticamente via IA); "
-                                            "nao pode ser usado com --all")
+                                            "nao pode ser usado com --all/--review")
+    p.add_argument("--review", action="store_true",
+                   help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar "
+                        "(terminal interativo; nao pode ser usado com --all/--message)")
     p.set_defaults(func=cmd_commit)
 
     p = sub.add_parser("push", help="da push do que ja foi commitado (o repo atual por padrao)")
@@ -431,7 +497,10 @@ def build_parser():
     g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
     g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
     p.add_argument("-m", "--message", help="mensagem customizada (sem isso, gera automaticamente via IA); "
-                                            "nao pode ser usado com --all")
+                                            "nao pode ser usado com --all/--review")
+    p.add_argument("--review", action="store_true",
+                   help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar e enviar "
+                        "(terminal interativo; nao pode ser usado com --all/--message)")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("history")
