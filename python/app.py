@@ -1,7 +1,9 @@
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -174,21 +176,51 @@ def cmd_preview(args):
         print(staged["message"])
 
 
+def _edit_message_in_editor(current_text):
+    """Abre o editor de texto do usuario (GIT_EDITOR/EDITOR, com fallback pro
+    notepad no Windows ou nano no Linux/macOS) num arquivo temporario
+    pre-preenchido - igual o `git commit` faz. Retorna o texto final (ou
+    string vazia se ficar vazio/o editor falhar)."""
+    editor = os.environ.get("GIT_EDITOR") or os.environ.get("EDITOR")
+    if not editor:
+        editor = "notepad" if core.IS_WINDOWS else "nano"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
+        tmp.write(current_text)
+        tmp_path = tmp.name
+
+    try:
+        if core.IS_WINDOWS:
+            subprocess.run(f'{editor} "{tmp_path}"', shell=True)
+        else:
+            subprocess.run([editor, tmp_path])
+        return Path(tmp_path).read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        print(f"(aviso) nao consegui abrir o editor '{editor}': {exc}")
+        return ""
+    finally:
+        os.unlink(tmp_path)
+
+
 def _review_message_prompt(repo_path, generated):
-    """Mostra a mensagem gerada e deixa usar/editar/cancelar. Retorna a
-    mensagem final, ou None se cancelado (inclusive se o input acabar sem
-    resposta - EOF, terminal fechado no meio, etc)."""
-    print(f"\nMensagem gerada para {repo_path}:\n  {generated}\n")
+    """Mostra a mensagem gerada e deixa usar/editar (abre um editor de
+    texto real)/cancelar. Retorna a mensagem final, ou None se cancelado
+    (inclusive se o input acabar sem resposta - EOF, terminal fechado no
+    meio, etc)."""
+    current = generated
+    print(f"\nMensagem gerada para {repo_path}:\n  {current}\n")
     try:
         while True:
-            choice = input("[S] usar essa  [E] editar  [C] cancelar: ").strip().lower()
+            choice = input("[S] usar essa  [E] editar (abre seu editor)  [C] cancelar: ").strip().lower()
             if choice == "s":
-                return generated
+                return current
             if choice == "e":
-                edited = input("Nova mensagem: ").strip()
+                edited = _edit_message_in_editor(current)
                 if edited:
-                    return edited
-                print("Mensagem vazia, tente de novo.")
+                    current = edited
+                    print(f"\nMensagem atualizada:\n  {current}\n")
+                else:
+                    print("Mensagem ficou vazia (ou o editor falhou), mantendo a anterior.")
                 continue
             if choice == "c":
                 return None
