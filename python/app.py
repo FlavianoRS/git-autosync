@@ -29,9 +29,10 @@ def cmd_status(args):
         return
     print(f"Ultima rodada geral: {status.get('lastSyncRun')}\n")
     for path, r in status.get("repos", {}).items():
-        tag = "[OK]" if r["success"] else "[ERRO]"
+        tag = "[OK]" if r.get("success") else "[ERRO]"
         print(f"{tag} {path}")
-        print(f"     ultima execucao: {r['lastRun']} | alteracoes: {r['hadChanges']} | {r['message']}")
+        print(f"     ultima execucao: {r.get('lastRun')} | alteracoes: {r.get('hadChanges')} | "
+              f"ultimo push: {r.get('lastPush') or 'nunca'} | {r.get('message', '')}")
 
 
 def cmd_list(args):
@@ -83,11 +84,65 @@ def cmd_set_schedule(args):
 
 
 def cmd_run_now(args):
-    print("Rodando sync agora...")
+    print("Rodando sync agora (commit + push)...")
     status = core.run_all()
     for path, r in status["repos"].items():
         tag = "[OK]" if r["success"] else "[ERRO]"
         print(f"{tag} {path}: {r['message']}")
+
+
+def cmd_commit_now(args):
+    print("Verificando e commitando (sem push)...")
+    status = core.commit_all()
+    for path, r in status["repos"].items():
+        tag = "[OK]" if r.get("success") else "[ERRO]"
+        print(f"{tag} {path}: {r.get('message', '')}")
+
+
+def cmd_push_now(args):
+    print("Dando push nos repositorios configurados...")
+    status = core.push_all()
+    for path, r in status["repos"].items():
+        tag = "[OK]" if r.get("success") else "[ERRO]"
+        print(f"{tag} {path}: {r.get('message', '')}")
+
+
+SINCE_PRESETS = {"7d": 7, "30d": 30, "90d": 90}
+
+
+def _since_arg(since):
+    if not since or since == "all":
+        return None
+    days = SINCE_PRESETS.get(since)
+    if days is None:
+        print(f"periodo invalido: {since} (use 7d, 30d, 90d ou all)", file=sys.stderr)
+        sys.exit(1)
+    import datetime
+    return (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def cmd_history(args):
+    since = _since_arg(args.since)
+    cfg = core.load_config()
+    if args.repo:
+        paths = [str(Path(args.repo))]
+    else:
+        paths = core.resolve_targets(cfg.get("targets", []))
+
+    result = {}
+    for p in paths:
+        result[p] = core.get_commit_log(p, since=since, limit=args.limit)
+
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+    for p, commits in result.items():
+        print(f"\n=== {p} ===")
+        if not commits:
+            print("  (sem commits no periodo)")
+            continue
+        for c in commits:
+            print(f"  {c['hash'][:8]}  {c['date']}  {c['message']}")
 
 
 def cmd_install(args):
@@ -133,176 +188,11 @@ def launch_detached(target, extra_args):
         subprocess.Popen([str(target), *extra_args])
 
 
-# ---------------- GUI (Tkinter) ----------------
+# ---------------- GUI ----------------
 
 def run_gui():
-    import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
-
-    cfg = core.load_config()
-
-    root = tk.Tk()
-    root.title("Git AutoSync")
-    root.geometry("780x520")
-
-    nb = ttk.Notebook(root)
-    nb.pack(fill="both", expand=True, padx=8, pady=8)
-
-    # --- Targets tab ---
-    tab_targets = ttk.Frame(nb)
-    nb.add(tab_targets, text="Diretorios")
-
-    columns = ("path", "type", "enabled")
-    tree = ttk.Treeview(tab_targets, columns=columns, show="headings", height=12)
-    for c, w in zip(columns, (480, 80, 80)):
-        tree.heading(c, text=c)
-        tree.column(c, width=w)
-    tree.pack(fill="both", expand=True, padx=6, pady=6)
-
-    def refresh_targets():
-        tree.delete(*tree.get_children())
-        for t in cfg["targets"]:
-            tree.insert("", "end", iid=t["path"], values=(t["path"], t["type"], t.get("enabled", True)))
-
-    refresh_targets()
-
-    form = ttk.Frame(tab_targets)
-    form.pack(fill="x", padx=6, pady=6)
-    path_var = tk.StringVar()
-    type_var = tk.StringVar(value="repo")
-    ttk.Entry(form, textvariable=path_var, width=60).pack(side="left", padx=4)
-
-    def browse():
-        d = filedialog.askdirectory()
-        if d:
-            path_var.set(d)
-
-    ttk.Button(form, text="Procurar...", command=browse).pack(side="left", padx=4)
-    ttk.Combobox(form, textvariable=type_var, values=["repo", "root"], width=6, state="readonly").pack(side="left", padx=4)
-
-    def add_target():
-        p = path_var.get().strip()
-        if not p or not Path(p).exists():
-            messagebox.showerror("Erro", "Caminho invalido ou inexistente.")
-            return
-        if any(t["path"] == p for t in cfg["targets"]):
-            messagebox.showinfo("Aviso", "Esse alvo ja esta na lista.")
-            return
-        cfg["targets"].append({"path": p, "type": type_var.get(), "enabled": True})
-        core.save_config(cfg)
-        refresh_targets()
-        path_var.set("")
-
-    ttk.Button(form, text="Adicionar", command=add_target).pack(side="left", padx=4)
-
-    def remove_selected():
-        sel = tree.selection()
-        if not sel:
-            return
-        cfg["targets"] = [t for t in cfg["targets"] if t["path"] not in sel]
-        core.save_config(cfg)
-        refresh_targets()
-
-    def toggle_selected():
-        sel = tree.selection()
-        if not sel:
-            return
-        for t in cfg["targets"]:
-            if t["path"] in sel:
-                t["enabled"] = not t.get("enabled", True)
-        core.save_config(cfg)
-        refresh_targets()
-
-    btns = ttk.Frame(tab_targets)
-    btns.pack(fill="x", padx=6, pady=(0, 6))
-    ttk.Button(btns, text="Remover selecionado", command=remove_selected).pack(side="left", padx=4)
-    ttk.Button(btns, text="Ativar/desativar selecionado", command=toggle_selected).pack(side="left", padx=4)
-
-    # --- Schedule tab ---
-    tab_sched = ttk.Frame(nb)
-    nb.add(tab_sched, text="Horarios")
-
-    ttk.Label(tab_sched, text="Horarios (HH:mm separados por virgula):").pack(anchor="w", padx=8, pady=(12, 2))
-    times_var = tk.StringVar(value=", ".join(cfg.get("schedules", [])))
-    ttk.Entry(tab_sched, textvariable=times_var, width=40).pack(anchor="w", padx=8)
-
-    def save_schedule():
-        times = [t.strip() for t in times_var.get().split(",") if t.strip()]
-        if not times:
-            messagebox.showerror("Erro", "Informe ao menos um horario HH:mm.")
-            return
-        cfg["schedules"] = times
-        core.save_config(cfg)
-        sync_target, _ = self_paths()
-        core.install_schedule(sync_target, schedules=times, task_name=cfg["taskName"])
-        messagebox.showinfo("OK", f"Horarios salvos e tarefa agendada atualizada: {', '.join(times)}")
-
-    ttk.Button(tab_sched, text="Salvar e reinstalar tarefa agendada", command=save_schedule).pack(anchor="w", padx=8, pady=8)
-
-    ttk.Separator(tab_sched, orient="horizontal").pack(fill="x", padx=8, pady=12)
-
-    def do_enable_tray():
-        _, gui_target = self_paths()
-        core.enable_tray_autostart(gui_target)
-        messagebox.showinfo("OK", "Tray habilitada. Vai iniciar com o login.")
-
-    def do_disable_tray():
-        core.disable_tray_autostart()
-        messagebox.showinfo("OK", "Tray desabilitada.")
-
-    def do_uninstall():
-        core.uninstall_schedule()
-        core.disable_tray_autostart()
-        messagebox.showinfo("OK", "Tarefa agendada e tray removidos.")
-
-    tray_frame = ttk.Frame(tab_sched)
-    tray_frame.pack(anchor="w", padx=8, pady=4)
-    ttk.Button(tray_frame, text="Habilitar tray (autostart)", command=do_enable_tray).pack(side="left", padx=4)
-    ttk.Button(tray_frame, text="Desabilitar tray", command=do_disable_tray).pack(side="left", padx=4)
-    ttk.Button(tray_frame, text="Desinstalar tudo", command=do_uninstall).pack(side="left", padx=4)
-
-    # --- Status tab ---
-    tab_status = ttk.Frame(nb)
-    nb.add(tab_status, text="Status")
-
-    status_columns = ("path", "success", "changes", "lastRun", "message")
-    status_tree = ttk.Treeview(tab_status, columns=status_columns, show="headings", height=14)
-    widths = (260, 60, 60, 130, 260)
-    for c, w in zip(status_columns, widths):
-        status_tree.heading(c, text=c)
-        status_tree.column(c, width=w)
-    status_tree.pack(fill="both", expand=True, padx=6, pady=6)
-
-    def refresh_status():
-        status_tree.delete(*status_tree.get_children())
-        status = core.load_status()
-        for path, r in status.get("repos", {}).items():
-            status_tree.insert("", "end", values=(path, r["success"], r["hadChanges"], r["lastRun"], r["message"]))
-
-    refresh_status()
-
-    run_now_btn = None
-
-    def run_now_bg():
-        run_now_btn.config(state="disabled", text="Rodando...")
-
-        def worker():
-            core.run_all()
-            root.after(0, on_done)
-
-        def on_done():
-            refresh_status()
-            run_now_btn.config(state="normal", text="Rodar agora")
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    status_btns = ttk.Frame(tab_status)
-    status_btns.pack(fill="x", padx=6, pady=(0, 6))
-    run_now_btn = ttk.Button(status_btns, text="Rodar agora", command=run_now_bg)
-    run_now_btn.pack(side="left", padx=4)
-    ttk.Button(status_btns, text="Atualizar", command=refresh_status).pack(side="left", padx=4)
-
-    root.mainloop()
+    import gui
+    gui.run_gui()
 
 
 # ---------------- Tray (pystray) ----------------
@@ -394,8 +284,17 @@ def run_tray():
 
 # ---------------- entry point ----------------
 
+def get_version():
+    base = Path(sys._MEIPASS) if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS") else Path(__file__).resolve().parent
+    version_file = base / "VERSION"
+    if version_file.exists():
+        return version_file.read_text(encoding="utf-8").strip()
+    return "desconhecida"
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="git-autosync")
+    parser.add_argument("--version", action="version", version=f"git-autosync {get_version()}")
     parser.add_argument("--gui", action="store_true", help="abre a interface grafica")
     parser.add_argument("--tray", action="store_true", help="abre o icone da bandeja")
     sub = parser.add_subparsers(dest="command")
@@ -420,8 +319,21 @@ def build_parser():
     p.add_argument("times", help='ex: "12:00,17:30"')
     p.set_defaults(func=cmd_set_schedule)
 
-    p = sub.add_parser("run-now")
+    p = sub.add_parser("run-now", help="commit + push de verdade (usado pela tarefa agendada)")
     p.set_defaults(func=cmd_run_now)
+
+    p = sub.add_parser("commit-now", help="so verifica e commita, sem push")
+    p.set_defaults(func=cmd_commit_now)
+
+    p = sub.add_parser("push-now", help="so push do que ja foi commitado")
+    p.set_defaults(func=cmd_push_now)
+
+    p = sub.add_parser("history")
+    p.add_argument("--repo", help="caminho de um repo especifico (default: todos os alvos configurados)")
+    p.add_argument("--since", default="all", help="7d, 30d, 90d ou all (default: all)")
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_history)
 
     p = sub.add_parser("install")
     p.set_defaults(func=cmd_install)
