@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.5.1
+version: 3.6.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
@@ -73,9 +73,9 @@ de `python app.py` nos comandos abaixo.
 <python> "<script>" exclude "<caminho do repo>"    # tira 1 repo de dentro de um alvo root (nao remove a pasta)
 <python> "<script>" include "<caminho do repo>"    # desfaz o exclude
 <python> "<script>" set-schedule "12:00,17:30"
-<python> "<script>" commit [--repo <caminho> | --all]   # commita, sem push (repo atual, outro, ou --all = TODOS)
-<python> "<script>" push [--repo <caminho> | --all]     # da push do que ja foi commitado (repo atual, outro, ou --all)
-<python> "<script>" sync [--repo <caminho> | --all]     # commit + push de verdade (repo atual, outro, ou --all)
+<python> "<script>" commit [--repo <caminho> | --all] [-m "mensagem"]   # commita, sem push
+<python> "<script>" push [--repo <caminho> | --all]                    # da push do que ja foi commitado
+<python> "<script>" sync [--repo <caminho> | --all] [-m "mensagem"]    # commit + push de verdade
 <python> "<script>" history --since 7d          # ou 30d / 90d / all, --repo <caminho>, --json
 <python> "<script>" install            # so a tarefa agendada/cron
 <python> "<script>" enable-tray        # tarefa agendada/cron + tray com autostart no login
@@ -93,6 +93,9 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
 
 - Sempre resolva o caminho completo do repo antes de Add/Remove (nao aceite caminho
   relativo ambiguo).
+- `-m "mensagem"` em `commit`/`sync` usa exatamente esse texto no commit, sem
+  gerar nada via IA - use quando o usuario ditar a mensagem que quer no chat.
+  Nao pode ser combinado com `--all`.
 - `set-schedule` reescreve a tarefa agendada/cron inteira (idempotente); avise o
   usuario que os horarios antigos serao substituidos.
 - Nunca edite `~/.git-autosync/status.json` ou `config.json` manualmente com Edit/Write

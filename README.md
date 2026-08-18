@@ -75,12 +75,16 @@ Sidebar com:
   amarelo/vermelho = N commits à frente, cinza = sem remoto configurado),
   horário do último push, botões **Commitar**/**Push**/**Sincronizar**
   individuais (cada um agindo só naquele repositório), e uma seta pra
-  expandir e ver as últimas mensagens de commit geradas. Cards que vieram de
-  uma pasta `root` mostram "via pasta: `<caminho>`" e, no lugar de
-  Ativar/Desativar/Remover, têm um botão **"Excluir da pasta"** — tira só
-  aquele repositório da varredura do root (equivalente ao `exclude` do CLI),
-  sem remover a pasta-raiz inteira. No topo, "Commitar tudo"/"Push
-  tudo"/"Sincronizar tudo" agem em todos de uma vez.
+  expandir e ver as últimas mensagens de commit geradas. **Commitar** e
+  **Sincronizar** abrem um diálogo pra digitar a mensagem do commit — deixe
+  vazio pra gerar automaticamente (via IA, com fallback se não tiver). Cards
+  que vieram de uma pasta `root` mostram "via pasta: `<caminho>`" e, no lugar
+  de Ativar/Desativar/Remover, têm um botão **"Ignorar"** — tira só aquele
+  repositório da varredura do root (equivalente ao `exclude` do CLI), sem
+  apagar nada do disco nem remover a pasta-raiz inteira. No topo, "Commitar
+  tudo"/"Push tudo"/"Sincronizar tudo" agem em todos de uma vez (sem diálogo
+  de mensagem — sempre automática, já que é pra vários repositórios de uma
+  vez).
   `Push`/`Sincronizar` verificam se o remoto está acessível antes — se não
   estiver, um popup oferece tentar de novo ou desistir (cancelar o push, ou
   seguir só commitando, dependendo do botão).
@@ -133,12 +137,18 @@ python app.py sync            # commit + push desse repo
 
 python app.py commit --repo outro/caminho   # ou aponte pra outro repo, sem precisar entrar nele
 python app.py sync --all                    # ou ignore o diretorio atual e rode em todos os alvos configurados
+
+python app.py commit -m "fix: ajuste manual"   # mensagem customizada, no lugar da gerada automaticamente
+python app.py sync -m "feat: nova tela"        # idem, pro commit dentro do sync
 ```
 
-`--repo` e `--all` são mutuamente exclusivos. `push`/`sync` verificam se o
-remoto está acessível antes de dar push (ou antes de commitar, no caso do
-`sync`) — se não estiver, perguntam `[T] tentar novamente` / `[C]` no terminal
-(cancelar o push, ou seguir só commitando, dependendo do comando).
+`--repo` e `--all` são mutuamente exclusivos. `-m`/`--message` não pode ser
+usado com `--all` (uma mensagem só não serve pra vários repositórios de uma
+vez) — sem `-m`, a mensagem é gerada automaticamente (via IA, com fallback se
+não tiver). `push`/`sync` verificam se o remoto está acessível antes de dar
+push (ou antes de commitar, no caso do `sync`) — se não estiver, perguntam
+`[T] tentar novamente` / `[C]` no terminal (cancelar o push, ou seguir só
+commitando, dependendo do comando).
 
 Se instalou o componente CLI pelo `installer/install.py`, esses comandos ficam
 disponíveis como `git-autosync commit|push|sync` de qualquer lugar do terminal

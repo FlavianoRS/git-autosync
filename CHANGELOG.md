@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.6.0
+
+- **Mensagem de commit customizada** (commit/sync individuais, GUI e CLI) —
+  antes só dava pra usar a mensagem gerada via IA/fallback. Agora:
+  - CLI: `commit -m "..."` / `sync -m "..."` (não combina com `--all`).
+  - GUI: **Commitar**/**Sincronizar** abrem um diálogo pra digitar a
+    mensagem — vazio continua gerando automaticamente.
+  - Ações em lote (`--all`, "Commitar tudo" etc) continuam sempre
+    automáticas, sem diálogo — não faz sentido uma mensagem só pra vários
+    repositórios.
+- **Renomeado**: botão "Excluir da pasta" → **"Ignorar"** (o nome antigo
+  dava a entender que apagaria a pasta do disco; não apaga nada, só tira o
+  repositório da varredura do `root`).
+
 ## 3.5.1
 
 - **Fix**: botão "Excluir da pasta" (GUI) não fazia nada quando o `path` do
