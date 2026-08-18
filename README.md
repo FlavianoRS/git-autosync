@@ -89,14 +89,27 @@ Sidebar com:
   vez).
   `Push`/`Sincronizar` verificam se o remoto está acessível antes — se não
   estiver, um popup oferece tentar de novo ou desistir (cancelar o push, ou
-  seguir só commitando, dependendo do botão).
+  seguir só commitando, dependendo do botão). Botão **▤ Lista / ▦ Cards** no
+  topo troca entre o card detalhado (padrão) e uma linha compacta por
+  repositório — preferência salva no `config.json` (`viewMode`).
 - **Histórico** — os mesmos cards em modo leitura, com filtro de período
-  (7 dias / 30 dias / 90 dias / tudo), expansíveis pra ver o log completo de cada
-  repositório.
+  (7 dias / 30 dias / 90 dias / tudo), expansíveis pra ver o log completo de
+  cada repositório, com o mesmo alternador Lista/Cards.
 - **Agendamento** — só configuração/monitoramento (horários, tarefa agendada,
   tray). Não tem botão de commit/push manual aqui de propósito: a rodada
   agendada já faz isso sozinha por definição.
 - **Log** — últimas linhas do log de execução.
+
+No fim da sidebar tem um seletor **Tema: Sistema / Claro / Escuro** — troca a
+aparência na hora, sem reiniciar, e salva a escolha (`theme` no
+`config.json`).
+
+## Aviso de falha na rodada agendada
+
+Se algum repositório falhar na rodada agendada (`run_sync.py`), o Windows
+mostra um balão de notificação nativo com quantos/quais falharam — não
+depende da GUI ou da tray estarem abertas. Sem isso, dá pra ver os detalhes
+igual antes, em `~/.git-autosync/autosync.log` ou `python app.py status`.
 
 ## Uso via linha de comando
 
@@ -148,6 +161,11 @@ python app.py sync --review     # idem, e só dá push depois de confirmar
 
 python app.py preview            # so gera e mostra a mensagem, sem commitar nada (nem deixa staged)
 ```
+
+Em `--review`, escolher `[E] editar` abre seu editor de texto de verdade
+(`$GIT_EDITOR`/`$EDITOR`, com fallback pro Notepad no Windows ou `nano` no
+Linux/macOS) num arquivo temporário pré-preenchido — igual o `git commit`
+tradicional — em vez de digitar tudo numa linha só.
 
 `--repo` e `--all` são mutuamente exclusivos. `-m`/`--message` e `--review`
 não podem ser usados com `--all` (uma mensagem/revisão só não serve pra

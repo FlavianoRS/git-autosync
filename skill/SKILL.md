@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.8.0
+version: 3.9.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.9.0
+
+- **Notificação nativa do Windows quando o push falha na rodada agendada** —
+  `run_sync.py` dispara um balão (`core.notify_windows`) com quantos/quais
+  repositórios falharam, sem depender de GUI/tray abertas.
+- **Editor de texto real no `--review` do CLI** — `[E] editar` agora abre
+  `$GIT_EDITOR`/`$EDITOR` (fallback Notepad/`nano`) num arquivo temporário,
+  em vez de digitar tudo numa linha só.
+- **Tema Sistema/Claro/Escuro** — seletor na sidebar da GUI, troca na hora
+  (sem reiniciar) e persiste em `config.json` (`theme`).
+- **Alternar Cards/Lista** — botão nas abas Status/Histórico pra trocar
+  entre o card detalhado e uma linha compacta por repositório; preferência
+  persiste em `config.json` (`viewMode`).
+- **Fix**: corrida ao fechar a GUI com atualizações de card ainda em
+  andamento em background podia jogar `RuntimeError` no console
+  (`run_bg` agora ignora com segurança se a janela já foi destruída).
+
 ## 3.8.0
 
 - **Comando `preview`**: gera a mensagem de commit e mostra, sem commitar
