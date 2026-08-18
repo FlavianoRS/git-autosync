@@ -22,7 +22,8 @@ Wizard interativo — deixa escolher, marcando mais de uma opção se quiser:
    instala as dependências da GUI, oferece já habilitar a tarefa agendada/tray e
    criar um atalho na área de trabalho.
 2. **CLI** — não precisa de dependência nenhuma além de Python + git; oferece
-   instalar só a tarefa agendada, sem GUI.
+   instalar a tarefa agendada e cria o comando `git-autosync` (com opção de
+   adicionar ao PATH), pra rodar de dentro de qualquer repositório.
 3. **Skill (Claude Code / Codex)** — copia os scripts + `SKILL.md` pra
    `~/.claude/skills/git-autosync` (e `~/.codex/skills/git-autosync` se detectar
    Codex instalado), pra usar a ferramenta via chat.
@@ -76,9 +77,9 @@ python app.py add <caminho> --type repo   # adiciona um repositório
 python app.py add <caminho> --type root   # adiciona uma pasta-raiz (sincroniza todo repo git dentro dela)
 python app.py remove <caminho>
 python app.py set-schedule "12:00,17:30"  # define horários e já reinstala a tarefa agendada
-python app.py run-now                     # commit + push de verdade (mesmo comportamento da tarefa agendada)
-python app.py commit-now                  # so verifica e commita, SEM push
-python app.py push-now                    # so da push do que ja foi commitado
+python app.py run-now                     # commit + push de verdade em TODOS os alvos configurados
+python app.py commit-now                  # so verifica e commita, SEM push, em TODOS os alvos
+python app.py push-now                    # so da push do que ja foi commitado, em TODOS os alvos
 python app.py history --since 7d          # 7d | 30d | 90d | all, --repo <caminho>, --json
 python app.py status [--json]             # resultado da ultima rodada
 python app.py log [--lines 40]            # mostra o final do log
@@ -91,6 +92,25 @@ python app.py --version
 
 Sem nenhum argumento, `python app.py` abre a GUI — pensado pra quem só quer dar
 duplo clique.
+
+### Uso ad-hoc, em um repositório específico
+
+`commit-now`/`push-now`/`run-now` agem sobre **todos** os alvos configurados em
+`config.json`. Pra agir sobre um repositório só — sem precisar cadastrá-lo antes —
+use `commit`/`push`/`sync`, que por padrão operam no diretório atual:
+
+```bash
+cd caminho/do/repo
+python app.py commit          # so commita esse repo (sem push)
+python app.py push            # so da push desse repo
+python app.py sync            # commit + push desse repo
+
+python app.py commit --repo outro/caminho   # ou aponte pra outro repo, sem precisar entrar nele
+```
+
+Se instalou o componente CLI pelo `installer/install.py`, esses comandos ficam
+disponíveis como `git-autosync commit|push|sync` de qualquer lugar do terminal
+(o instalador cria o atalho e oferece adicionar ao PATH).
 
 ## Configuração e dados
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.1.0
+
+- **Fix**: diálogo "Adicionar repositório" tinha o botão "Adicionar" cortado
+  (janela baixa demais pro conteúdo — agora com altura suficiente).
+- **Comando `git-autosync` no PATH**: o instalador (opção CLI) cria um atalho
+  chamado `git-autosync` (não mais `python app.py`) e oferece adicionar ao PATH
+  do usuário, pra chamar de qualquer terminal.
+- **Ações ad-hoc em um repositório só**: `commit`/`push`/`sync` (com `--repo`
+  opcional, default o diretório atual) — não precisa cadastrar o repositório em
+  `config.json` primeiro. Diferente de `commit-now`/`push-now`/`run-now`, que
+  continuam agindo sobre todos os alvos configurados.
+- **Ícone próprio** (`python/assets/icon.ico`/`icon.png`, gerado do zero com
+  PIL — sem depender de nenhum asset de terceiros): usado na janela da GUI, no
+  executável empacotado e no atalho criado pelo instalador.
+- **Fix de build**: `build_windows.ps1`/`build_linux.sh` estavam gerando o
+  executável direto de `app.py`, ignorando os `.spec` versionados (então
+  `VERSION`/ícone/hiddenimports nunca eram de fato embutidos) — agora usam
+  `git-autosync.spec`/`git-autosync-sync.spec`.
+
 ## 3.0.0
 
 Redesign pra compartilhar a ferramenta com o time de desenvolvimento.

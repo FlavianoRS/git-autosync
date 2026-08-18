@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.0.0
+version: 3.1.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
@@ -71,9 +71,12 @@ de `python app.py` nos comandos abaixo.
 <python> "<script>" add "<caminho do repo>" --type repo      # ou --type root p/ pasta com varios repos
 <python> "<script>" remove "<caminho do repo>"
 <python> "<script>" set-schedule "12:00,17:30"
-<python> "<script>" run-now                    # commit + push de verdade
-<python> "<script>" commit-now                 # so verifica e commita, SEM push
-<python> "<script>" push-now                    # so da push do que ja foi commitado
+<python> "<script>" run-now                    # commit + push de verdade em TODOS os alvos configurados
+<python> "<script>" commit-now                 # so verifica e commita, SEM push, em TODOS os alvos
+<python> "<script>" push-now                    # so da push do que ja foi commitado, em TODOS os alvos
+<python> "<script>" commit [--repo <caminho>]   # commit ad-hoc de UM repo (default: diretorio atual)
+<python> "<script>" push [--repo <caminho>]     # push ad-hoc de UM repo (default: diretorio atual)
+<python> "<script>" sync [--repo <caminho>]     # commit + push ad-hoc de UM repo (default: diretorio atual)
 <python> "<script>" history --since 7d          # ou 30d / 90d / all, --repo <caminho>, --json
 <python> "<script>" install            # so a tarefa agendada/cron
 <python> "<script>" enable-tray        # tarefa agendada/cron + tray com autostart no login
