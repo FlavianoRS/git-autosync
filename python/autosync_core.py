@@ -134,8 +134,9 @@ def exclude_repo_from_root(root_path, repo_path):
     resolve_targets_detailed() passa a pular esse repo. Nao afeta o
     repositorio em si, so o que o autosync considera dentro daquela pasta."""
     cfg = load_config()
+    target_p = Path(root_path)
     for t in cfg["targets"]:
-        if t.get("type") == "root" and t["path"] == root_path:
+        if t.get("type") == "root" and Path(t["path"]) == target_p:
             excluded = t.setdefault("exclude", [])
             if repo_path not in excluded:
                 excluded.append(repo_path)
@@ -147,8 +148,9 @@ def exclude_repo_from_root(root_path, repo_path):
 def include_repo_in_root(root_path, repo_path):
     """Desfaz exclude_repo_from_root()."""
     cfg = load_config()
+    target_p = Path(root_path)
     for t in cfg["targets"]:
-        if t.get("type") == "root" and t["path"] == root_path:
+        if t.get("type") == "root" and Path(t["path"]) == target_p:
             excluded = t.get("exclude", [])
             if repo_path in excluded:
                 excluded.remove(repo_path)
