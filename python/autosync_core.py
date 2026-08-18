@@ -62,10 +62,17 @@ def write_log(repo_path, message):
     print(line)
 
 
+def _no_window_flags():
+    """Suppresses the console flash Windows shows for each subprocess spawned
+    from a windowed (GUI/pythonw) process."""
+    return {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
+
+
 def _run(args, cwd=None, timeout=None):
     return subprocess.run(
         args, cwd=cwd, capture_output=True, text=True,
         encoding="utf-8", errors="replace", timeout=timeout,
+        **_no_window_flags(),
     )
 
 
@@ -85,14 +92,16 @@ def resolve_targets(targets):
     return paths
 
 
-def sync_repo(repo_path):
-    """Returns dict: path, time, success, hadChanges, message."""
+def commit_repo(repo_path):
+    """Stages and commits pending changes (no push). Returns dict: path, time,
+    success, hadChanges, message, commitHash."""
     result = {
         "path": repo_path,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "success": False,
         "hadChanges": False,
         "message": "",
+        "commitHash": None,
     }
 
     if not (Path(repo_path) / ".git").exists():
@@ -146,17 +155,42 @@ def sync_repo(repo_path):
             _run(["git", "commit", "-F", tmp_path], cwd=repo_path)
         finally:
             os.unlink(tmp_path)
-        write_log(repo_path, f"commit local ok: {commit_msg}")
 
+        result["success"] = True
+        result["message"] = f"commit: {commit_msg}"
+        result["commitHash"] = _run(["git", "rev-parse", "HEAD"], cwd=repo_path).stdout.strip() or None
+        write_log(repo_path, f"commit local ok: {commit_msg}")
+    except Exception as exc:
+        result["message"] = f"erro inesperado: {exc}"
+        write_log(repo_path, f"ERRO: {exc}")
+
+    return result
+
+
+def push_repo(repo_path):
+    """Pushes whatever is already committed locally. Returns dict: path, time,
+    success, message."""
+    result = {
+        "path": repo_path,
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "success": False,
+        "message": "",
+    }
+
+    if not (Path(repo_path) / ".git").exists():
+        result["message"] = "nao e repositorio git, pulando"
+        write_log(repo_path, f"ERRO: {result['message']}.")
+        return result
+
+    try:
         push = _run(["git", "push"], cwd=repo_path)
         if push.returncode == 0:
             result["success"] = True
-            result["message"] = f"commit: {commit_msg} | push ok"
+            result["message"] = "push ok"
             write_log(repo_path, "push ok.")
         else:
-            result["success"] = False
             push_err = (push.stderr or push.stdout).strip()
-            result["message"] = f"commit: {commit_msg} | push FALHOU: {push_err}"
+            result["message"] = f"push FALHOU: {push_err}"
             write_log(repo_path, f"AVISO: push falhou -> {push_err}")
     except Exception as exc:
         result["message"] = f"erro inesperado: {exc}"
@@ -165,23 +199,112 @@ def sync_repo(repo_path):
     return result
 
 
+def sync_repo(repo_path):
+    """Commit followed by push — used by the scheduled task and `run-now`.
+    Returns dict: path, time, success, hadChanges, message."""
+    commit_result = commit_repo(repo_path)
+    if not commit_result["success"] or not commit_result["hadChanges"]:
+        return {k: commit_result[k] for k in ("path", "time", "success", "hadChanges", "message")}
+
+    push_result = push_repo(repo_path)
+    return {
+        "path": repo_path,
+        "time": push_result["time"],
+        "success": push_result["success"],
+        "hadChanges": True,
+        "message": f"{commit_result['message']} | {push_result['message']}",
+    }
+
+
+def _update_status_entry(status, repo_path, **fields):
+    repos = status.setdefault("repos", {})
+    entry = repos.setdefault(repo_path, {})
+    entry.update(fields)
+    return entry
+
+
 def run_all():
+    """Commit + push every enabled target — used by the scheduled task and
+    the `run-now` CLI command."""
     cfg = load_config()
     paths = resolve_targets(cfg.get("targets", []))
     status = load_status()
-    repos = status.get("repos", {})
     for p in paths:
         r = sync_repo(p)
-        repos[p] = {
-            "lastRun": r["time"],
-            "success": r["success"],
-            "hadChanges": r["hadChanges"],
-            "message": r["message"],
-        }
-    status["repos"] = repos
+        _update_status_entry(
+            status, p,
+            lastRun=r["time"], success=r["success"],
+            hadChanges=r["hadChanges"], message=r["message"],
+        )
+        if r["success"] and r["hadChanges"]:
+            _update_status_entry(status, p, lastPush=r["time"])
     status["lastSyncRun"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     save_status(status)
     return status
+
+
+def commit_all():
+    """Commit-only pass over every enabled target (no push) — used by the
+    manual 'Commitar tudo' action in the GUI/CLI."""
+    cfg = load_config()
+    paths = resolve_targets(cfg.get("targets", []))
+    status = load_status()
+    for p in paths:
+        r = commit_repo(p)
+        _update_status_entry(
+            status, p,
+            lastRun=r["time"], success=r["success"],
+            hadChanges=r["hadChanges"], message=r["message"],
+        )
+    status["lastSyncRun"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    save_status(status)
+    return status
+
+
+def push_all():
+    """Push-only pass over every enabled target — used by the manual
+    'Push tudo' action in the GUI/CLI."""
+    cfg = load_config()
+    paths = resolve_targets(cfg.get("targets", []))
+    status = load_status()
+    for p in paths:
+        r = push_repo(p)
+        if r["success"]:
+            _update_status_entry(status, p, lastPush=r["time"], message=r["message"])
+        else:
+            _update_status_entry(status, p, message=r["message"])
+    save_status(status)
+    return status
+
+
+def get_unpushed_count(repo_path):
+    """Number of local commits not yet on the upstream branch, or None if the
+    branch has no upstream configured."""
+    upstream = _run(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=repo_path)
+    if upstream.returncode != 0:
+        return None
+    count = _run(["git", "rev-list", "--count", "@{u}..HEAD"], cwd=repo_path)
+    try:
+        return int(count.stdout.strip())
+    except ValueError:
+        return None
+
+
+def get_commit_log(repo_path, since=None, limit=50):
+    """Returns [{hash, date, message}, ...], newest first. `since` is an ISO
+    date/datetime string understood by `git log --since`."""
+    args = ["git", "log", f"--format=%H|%cI|%s", f"-n{limit}"]
+    if since:
+        args.append(f"--since={since}")
+    proc = _run(args, cwd=repo_path)
+    if proc.returncode != 0:
+        return []
+    commits = []
+    for line in proc.stdout.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) == 3:
+            commits.append({"hash": parts[0], "date": parts[1], "message": parts[2]})
+    return commits
 
 
 # ---- scheduler (OS-native recurring execution) ----
@@ -208,7 +331,7 @@ def install_schedule(sync_target, schedules=None, task_name=None):
             subprocess.run(
                 ["schtasks", "/Create", "/TN", name, "/TR", cmd,
                  "/SC", "DAILY", "/ST", t, "/F"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **_no_window_flags(),
             )
     else:
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -226,7 +349,7 @@ def uninstall_schedule(task_name=None):
     if IS_WINDOWS:
         for i in range(20):
             subprocess.run(["schtasks", "/Delete", "/TN", f"{task_name}_{i}", "/F"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, **_no_window_flags())
     else:
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         lines = [l for l in existing.stdout.splitlines() if CRON_MARKER not in l]
