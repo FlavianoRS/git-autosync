@@ -95,45 +95,29 @@ def cmd_set_schedule(args):
     print(f"Horarios atualizados: {', '.join(times)}")
 
 
-def _cli_push_decider(repo_path):
-    """Chamado quando o remoto de repo_path esta inacessivel, antes de
-    commitar. Pergunta no terminal [T]/[C]; sem terminal interativo (rodando
-    de um script/tarefa), so avisa e segue commitando sem dar push."""
-    if not sys.stdin.isatty():
-        print(f"[aviso] {repo_path}: remoto inacessivel agora, commitando sem dar push.")
-        return False
-    while True:
-        choice = input(f"[aviso] {repo_path}: remoto inacessivel agora. "
-                        f"[T] tentar novamente  [C] apenas commit: ").strip().lower()
-        if choice == "t":
-            return True
-        if choice == "c":
+def _make_cli_push_decider(cancel_label):
+    """Chamado quando o remoto de um repo esta inacessivel, antes de
+    commitar/dar push. Pergunta no terminal [T]/[C]; sem terminal interativo
+    (rodando de um script/tarefa), so avisa e segue (cancel_label descreve o
+    que acontece ao desistir: 'apenas commit' pro fluxo de sync, 'cancelar'
+    pro de push puro)."""
+    def decider(repo_path):
+        if not sys.stdin.isatty():
+            print(f"[aviso] {repo_path}: remoto inacessivel agora, {cancel_label}.")
             return False
-        print("Resposta invalida, digite T ou C.")
+        while True:
+            choice = input(f"[aviso] {repo_path}: remoto inacessivel agora. "
+                            f"[T] tentar novamente  [C] {cancel_label}: ").strip().lower()
+            if choice == "t":
+                return True
+            if choice == "c":
+                return False
+            print("Resposta invalida, digite T ou C.")
+    return decider
 
 
-def cmd_run_now(args):
-    print("Rodando sync agora (commit + push)...")
-    status = core.run_all(push_decider=_cli_push_decider)
-    for path, r in status["repos"].items():
-        tag = "[OK]" if r["success"] else "[ERRO]"
-        print(f"{tag} {path}: {r['message']}")
-
-
-def cmd_commit_now(args):
-    print("Verificando e commitando (sem push)...")
-    status = core.commit_all()
-    for path, r in status["repos"].items():
-        tag = "[OK]" if r.get("success") else "[ERRO]"
-        print(f"{tag} {path}: {r.get('message', '')}")
-
-
-def cmd_push_now(args):
-    print("Dando push nos repositorios configurados...")
-    status = core.push_all()
-    for path, r in status["repos"].items():
-        tag = "[OK]" if r.get("success") else "[ERRO]"
-        print(f"{tag} {path}: {r.get('message', '')}")
+_cli_sync_decider = _make_cli_push_decider("apenas commit")
+_cli_push_only_decider = _make_cli_push_decider("cancelar o push")
 
 
 def _resolve_repo_arg(repo_arg):
@@ -141,7 +125,17 @@ def _resolve_repo_arg(repo_arg):
     return str(Path(repo_arg).resolve()) if repo_arg else str(Path.cwd())
 
 
+def _print_batch_result(status):
+    for path, r in status["repos"].items():
+        tag = "[OK]" if r.get("success") else "[ERRO]"
+        print(f"{tag} {path}: {r.get('message', '')}")
+
+
 def cmd_commit(args):
+    if args.all:
+        print("Verificando e commitando (sem push) em todos os alvos configurados...")
+        _print_batch_result(core.commit_all())
+        return
     path = _resolve_repo_arg(args.repo)
     r = core.commit_repo(path)
     tag = "[OK]" if r["success"] else "[ERRO]"
@@ -149,15 +143,23 @@ def cmd_commit(args):
 
 
 def cmd_push(args):
+    if args.all:
+        print("Dando push em todos os alvos configurados...")
+        _print_batch_result(core.push_all(push_decider=_cli_push_only_decider))
+        return
     path = _resolve_repo_arg(args.repo)
-    r = core.push_repo(path)
+    r = core.push_repo_checked(path, push_decider=_cli_push_only_decider)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
 
 def cmd_sync(args):
+    if args.all:
+        print("Rodando sync (commit + push) em todos os alvos configurados...")
+        _print_batch_result(core.run_all(push_decider=_cli_sync_decider))
+        return
     path = _resolve_repo_arg(args.repo)
-    r = core.sync_repo(path, push_decider=_cli_push_decider)
+    r = core.sync_repo(path, push_decider=_cli_sync_decider)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -372,25 +374,22 @@ def build_parser():
     p.add_argument("times", help='ex: "12:00,17:30"')
     p.set_defaults(func=cmd_set_schedule)
 
-    p = sub.add_parser("run-now", help="commit + push de verdade (usado pela tarefa agendada)")
-    p.set_defaults(func=cmd_run_now)
-
-    p = sub.add_parser("commit-now", help="so verifica e commita, sem push")
-    p.set_defaults(func=cmd_commit_now)
-
-    p = sub.add_parser("push-now", help="so push do que ja foi commitado")
-    p.set_defaults(func=cmd_push_now)
-
-    p = sub.add_parser("commit", help="commita so um repo (o atual, ou --repo), sem push")
-    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p = sub.add_parser("commit", help="commita, sem push (o repo atual por padrao)")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
     p.set_defaults(func=cmd_commit)
 
-    p = sub.add_parser("push", help="da push num repo (o atual, ou --repo)")
-    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p = sub.add_parser("push", help="da push do que ja foi commitado (o repo atual por padrao)")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
     p.set_defaults(func=cmd_push)
 
-    p = sub.add_parser("sync", help="commit + push num repo (o atual, ou --repo)")
-    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p = sub.add_parser("sync", help="commit + push de verdade (o repo atual por padrao)")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("history")
