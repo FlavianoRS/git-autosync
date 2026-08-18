@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.4.0
+
+- **Fix**: GUI mostrava só 1 card pra um alvo tipo `root` (a pasta inteira,
+  que nem é repositório git) em vez de 1 card por repositório real dentro
+  dela — sem controle individual de commit/push por repo. Status e Histórico
+  agora resolvem os alvos de verdade (`resolve_targets_detailed`, novo em
+  `autosync_core.py`): cada repositório dentro de uma pasta `root` ganha seu
+  próprio card, com Commitar/Push/Sincronizar isolados nele. Esses cards
+  mostram "via pasta: `<caminho>`" e não têm Ativar/Remover — quem controla é
+  a pasta-raiz (`python app.py remove <pasta>`), não o repositório.
+- **Push-only também verifica conexão antes** (GUI e CLI) — antes só o fluxo
+  de commit+push (`sync`) fazia essa checagem; agora `push_repo_checked`
+  cobre push puro também, com popup/prompt "Cancelar" no lugar de "Apenas
+  commit" (não há commit num push isolado).
+- **CLI consolidado**: `commit-now`/`push-now`/`run-now` saem de cena.
+  `commit`/`push`/`sync` continuam agindo no repositório atual por padrão
+  (ou `--repo <caminho>`), e ganham `--all` pra agir em todos os alvos
+  configurados — um jeito só de escrever cada ação, com o mesmo "onde" pra
+  todo mundo. Não afeta a tarefa agendada (chama `core.run_all()` direto,
+  nunca passou pelo parser de comandos).
+
 ## 3.3.1
 
 - **Fix**: o fix de icone da 3.3.0 (reaplicar `iconbitmap`) nao resolvia

@@ -1,6 +1,6 @@
 ---
 name: git-autosync
-version: 3.3.1
+version: 3.4.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
@@ -71,12 +71,9 @@ de `python app.py` nos comandos abaixo.
 <python> "<script>" add "<caminho do repo>" --type repo      # ou --type root p/ pasta com varios repos
 <python> "<script>" remove "<caminho do repo>"
 <python> "<script>" set-schedule "12:00,17:30"
-<python> "<script>" run-now                    # commit + push de verdade em TODOS os alvos configurados
-<python> "<script>" commit-now                 # so verifica e commita, SEM push, em TODOS os alvos
-<python> "<script>" push-now                    # so da push do que ja foi commitado, em TODOS os alvos
-<python> "<script>" commit [--repo <caminho>]   # commit ad-hoc de UM repo (default: diretorio atual)
-<python> "<script>" push [--repo <caminho>]     # push ad-hoc de UM repo (default: diretorio atual)
-<python> "<script>" sync [--repo <caminho>]     # commit + push ad-hoc de UM repo (default: diretorio atual)
+<python> "<script>" commit [--repo <caminho> | --all]   # commita, sem push (repo atual, outro, ou --all = TODOS)
+<python> "<script>" push [--repo <caminho> | --all]     # da push do que ja foi commitado (repo atual, outro, ou --all)
+<python> "<script>" sync [--repo <caminho> | --all]     # commit + push de verdade (repo atual, outro, ou --all)
 <python> "<script>" history --since 7d          # ou 30d / 90d / all, --repo <caminho>, --json
 <python> "<script>" install            # so a tarefa agendada/cron
 <python> "<script>" enable-tray        # tarefa agendada/cron + tray com autostart no login
@@ -98,20 +95,26 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
   usuario que os horarios antigos serao substituidos.
 - Nunca edite `~/.git-autosync/status.json` ou `config.json` manualmente com Edit/Write
   - sempre pelos subcomandos, que sao a fonte de verdade e mantem o schema coerente.
-- `run-now` executa commit **e** push de verdade nos repos configurados que tiverem
-  mudancas pendentes — avise o usuario antes de rodar em um alvo que ele nao pediu
-  explicitamente para sincronizar agora, ja que isso cria commits e publica de verdade.
-  Se o usuario so quer revisar antes de publicar, prefira `commit-now` e pergunte antes
-  de rodar `push-now` depois.
-- `run-now`/`sync` verificam se o remoto esta acessivel ANTES de commitar. Se nao
-  estiver e o comando estiver rodando com terminal interativo, ele PERGUNTA no
-  proprio terminal (`[T] tentar novamente` / `[C] apenas commit`) e fica esperando
-  resposta ali mesmo — nao tem como essa pergunta ser respondida por voce, avise o
-  usuario que precisa responder no terminal. Sem terminal interativo (chamado via
-  script), ele so avisa e segue commitando sem dar push, sem travar.
+- `sync` (com ou sem `--all`) executa commit **e** push de verdade nos repos
+  que tiverem mudancas pendentes — avise o usuario antes de rodar num alvo
+  que ele nao pediu explicitamente para sincronizar agora, ja que isso cria
+  commits e publica de verdade. Se o usuario so quer revisar antes de
+  publicar, prefira `commit` e pergunte antes de rodar `push` depois.
+- `--repo <caminho>` e `--all` sao mutuamente exclusivos. Sem nenhum dos dois,
+  `commit`/`push`/`sync` agem no diretorio atual (cwd de quem rodou o
+  comando) — normalmente NAO e o que voce quer ao rodar via chat, prefira
+  sempre `--repo <caminho completo>` ou `--all` explicito.
+- `push`/`sync` verificam se o remoto esta acessivel ANTES de dar push (ou
+  antes de commitar, no caso do `sync`). Se nao estiver e o comando estiver
+  rodando com terminal interativo, ele PERGUNTA no proprio terminal
+  (`[T] tentar novamente` / `[C] ...`) e fica esperando resposta ali mesmo —
+  nao tem como essa pergunta ser respondida por voce, avise o usuario que
+  precisa responder no terminal. Sem terminal interativo (chamado via
+  script/tool call, que e o seu caso), ele so avisa e segue (commitando sem
+  dar push, ou cancelando o push), sem travar.
 - Em maquina nova, apos instalar a skill: nao ha config previo. Primeiro comando
   ja cria `~/.git-autosync/config.json` vazio (sem alvos) - use `add` para configurar
-  os diretorios da pessoa antes de `install`/`run-now`.
+  os diretorios da pessoa antes de `install`/`sync --all`.
 - Empacotamento em executavel standalone (PyInstaller, sem Python na maquina de
   destino): `scripts/build_windows.ps1` ou `scripts/build_linux.sh` (rodar no SO alvo,
   nao ha cross-compile). Isso e uma conveniencia a parte, nao e necessario para o uso

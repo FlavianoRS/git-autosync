@@ -69,11 +69,20 @@ clique em `python/gui_launcher.pyw`.
 Sidebar com:
 
 - **+ Adicionar repositório** — abre um diálogo (caminho + tipo repo/root).
-- **Status** — um card por repositório: badge com quantos commits estão sem push
-  (verde = tudo enviado, amarelo/vermelho = N commits à frente, cinza = sem
-  remoto configurado), horário do último push, botões **Commitar**/**Push**
-  individuais, e uma seta pra expandir e ver as últimas mensagens de commit
-  geradas. No topo, "Commitar tudo" e "Push tudo" pra agir em todos de uma vez.
+- **Status** — um card **por repositório real** (um alvo tipo `root` aparece
+  como 1 card por repositório git dentro da pasta, não 1 card pra pasta
+  inteira): badge com quantos commits estão sem push (verde = tudo enviado,
+  amarelo/vermelho = N commits à frente, cinza = sem remoto configurado),
+  horário do último push, botões **Commitar**/**Push**/**Sincronizar**
+  individuais (cada um agindo só naquele repositório), e uma seta pra
+  expandir e ver as últimas mensagens de commit geradas. Cards que vieram de
+  uma pasta `root` mostram "via pasta: `<caminho>`" e não têm
+  Ativar/Desativar/Remover — quem controla é a pasta-raiz (via CLI:
+  `remove <caminho-da-pasta>`), não o repositório individual. No topo,
+  "Commitar tudo"/"Push tudo"/"Sincronizar tudo" agem em todos de uma vez.
+  `Push`/`Sincronizar` verificam se o remoto está acessível antes — se não
+  estiver, um popup oferece tentar de novo ou desistir (cancelar o push, ou
+  seguir só commitando, dependendo do botão).
 - **Histórico** — os mesmos cards em modo leitura, com filtro de período
   (7 dias / 30 dias / 90 dias / tudo), expansíveis pra ver o log completo de cada
   repositório.
@@ -90,9 +99,9 @@ python app.py add <caminho> --type repo   # adiciona um repositório
 python app.py add <caminho> --type root   # adiciona uma pasta-raiz (sincroniza todo repo git dentro dela)
 python app.py remove <caminho>
 python app.py set-schedule "12:00,17:30"  # define horários e já reinstala a tarefa agendada
-python app.py run-now                     # commit + push de verdade em TODOS os alvos configurados
-python app.py commit-now                  # so verifica e commita, SEM push, em TODOS os alvos
-python app.py push-now                    # so da push do que ja foi commitado, em TODOS os alvos
+python app.py commit --all                # so verifica e commita, SEM push, em TODOS os alvos
+python app.py push --all                  # so da push do que ja foi commitado, em TODOS os alvos
+python app.py sync --all                  # commit + push de verdade em TODOS os alvos configurados
 python app.py history --since 7d          # 7d | 30d | 90d | all, --repo <caminho>, --json
 python app.py status [--json]             # resultado da ultima rodada
 python app.py log [--lines 40]            # mostra o final do log
@@ -106,11 +115,12 @@ python app.py --version
 Sem nenhum argumento, `python app.py` abre a GUI — pensado pra quem só quer dar
 duplo clique.
 
-### Uso ad-hoc, em um repositório específico
+### Escopo: repo atual, outro repo, ou todos
 
-`commit-now`/`push-now`/`run-now` agem sobre **todos** os alvos configurados em
-`config.json`. Pra agir sobre um repositório só — sem precisar cadastrá-lo antes —
-use `commit`/`push`/`sync`, que por padrão operam no diretório atual:
+`commit`/`push`/`sync` sempre agem sobre **um repositório**: o diretório atual
+por padrão — não precisa estar cadastrado em `config.json` pra isso — ou outro
+via `--repo`. Use `--all` pra agir sobre todos os alvos configurados de uma vez
+(equivalente ao que antes eram `commit-now`/`push-now`/`run-now`):
 
 ```bash
 cd caminho/do/repo
@@ -119,7 +129,13 @@ python app.py push            # so da push desse repo
 python app.py sync            # commit + push desse repo
 
 python app.py commit --repo outro/caminho   # ou aponte pra outro repo, sem precisar entrar nele
+python app.py sync --all                    # ou ignore o diretorio atual e rode em todos os alvos configurados
 ```
+
+`--repo` e `--all` são mutuamente exclusivos. `push`/`sync` verificam se o
+remoto está acessível antes de dar push (ou antes de commitar, no caso do
+`sync`) — se não estiver, perguntam `[T] tentar novamente` / `[C]` no terminal
+(cancelar o push, ou seguir só commitando, dependendo do comando).
 
 Se instalou o componente CLI pelo `installer/install.py`, esses comandos ficam
 disponíveis como `git-autosync commit|push|sync` de qualquer lugar do terminal
@@ -167,10 +183,10 @@ Gera em `python/dist/`:
 
 ## Aviso de segurança
 
-A rodada agendada (e os comandos `run-now`/`commit-now`) fazem `git add -A` +
+A rodada agendada (e os comandos `commit`/`sync`) fazem `git add -A` +
 `git commit` automaticamente, sem revisão humana, e enviam o diff (até 12000
-caracteres) pro `claude` CLI pra gerar a mensagem de commit. `run-now` e o botão
-"Push tudo"/tarefa agendada também dão `push` de verdade. Não aponte para
+caracteres) pro `claude` CLI pra gerar a mensagem de commit. `sync`/`push` e o
+botão "Push tudo"/tarefa agendada também dão `push` de verdade. Não aponte para
 repositórios onde isso seja um problema (ex: diffs com segredos/credenciais que
 não deveriam sair da máquina, ou onde publicar sem revisão não é aceitável).
 
