@@ -54,6 +54,18 @@ def _set_window_icon(win):
 
 SIDEBAR_WIDTH = 210
 HISTORY_PRESETS = [("7 dias", "7d"), ("30 dias", "30d"), ("90 dias", "90d"), ("Tudo", "all")]
+CARD_GRID_COLS = 3
+
+
+def _place_repo_cards(cards, compact):
+    """Modo Lista: 1 card por linha (pack), como sempre foi. Modo Cards:
+    grade horizontal fixa de CARD_GRID_COLS colunas."""
+    if compact:
+        for card in cards:
+            card.pack(fill="x", pady=3)
+    else:
+        for i, card in enumerate(cards):
+            card.grid(row=i // CARD_GRID_COLS, column=i % CARD_GRID_COLS, padx=8, pady=8, sticky="n")
 
 
 def _since_from_preset(preset):
@@ -305,6 +317,8 @@ class CommitListPanel(ctk.CTkFrame):
 class RepoCard(ctk.CTkFrame):
     """One repository: header (badge/last push/actions) + collapsible commit list."""
 
+    CARD_WIDTH = 300
+
     def __init__(self, master, entry, root, on_changed, history_mode=False, compact=False):
         self.compact = compact
         super().__init__(master, corner_radius=6 if compact else 10, fg_color=("gray95", "gray20"))
@@ -317,78 +331,121 @@ class RepoCard(ctk.CTkFrame):
         self.history_mode = history_mode
         self.expanded = False
         self.since_preset = "all"
-
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=10 if compact else 12, pady=(6, 2) if compact else (10, 4))
-
         name = self.path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1]
-        title_box = ctk.CTkFrame(header, fg_color="transparent")
-        title_box.pack(side="left", fill="x", expand=True)
+
         if compact:
-            title_row = ctk.CTkFrame(title_box, fg_color="transparent")
-            title_row.pack(anchor="w", fill="x")
-            ctk.CTkLabel(title_row, text=name, font=ctk.CTkFont(weight="bold", size=12), width=200,
-                         anchor="w").pack(side="left")
-            if not self.manageable:
-                ctk.CTkLabel(title_row, text="(via pasta)", text_color="gray",
-                             font=ctk.CTkFont(size=10, slant="italic")).pack(side="left", padx=(6, 0))
+            self._build_list_row(name, entry)
         else:
-            ctk.CTkLabel(title_box, text=name, font=ctk.CTkFont(weight="bold")).pack(anchor="w")
-            ctk.CTkLabel(title_box, text=self.path, text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w")
-            if not self.manageable:
-                ctk.CTkLabel(title_box, text=f"via pasta: {self.source_path}", text_color="gray",
-                             font=ctk.CTkFont(size=11, slant="italic")).pack(anchor="w")
-
-        badge_width = 100 if compact else 140
-        self.pending_badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
-                                           text_color="white", padx=8 if compact else 10, width=badge_width)
-        self.pending_badge.pack(side="left", padx=(4 if compact else 8))
-
-        self.badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
-                                   text_color="white", padx=8 if compact else 10, width=70 if compact else 90)
-        self.badge.pack(side="left", padx=(4 if compact else 8))
-
-        if not compact:
-            self.last_push_lbl = ctk.CTkLabel(header, text="ultimo push: ...", text_color="gray",
-                                               font=ctk.CTkFont(size=11))
-            self.last_push_lbl.pack(side="left", padx=8)
-        else:
-            self.last_push_lbl = ctk.CTkLabel(header, text="", text_color="gray", font=ctk.CTkFont(size=10))
-            self.last_push_lbl.pack(side="left", padx=4)
-
-        # em modo lista, os botoes ficam na mesma linha (header); em modo card, numa linha propria abaixo
-        actions = header if compact else ctk.CTkFrame(self, fg_color="transparent")
-        if not compact:
-            actions.pack(fill="x", padx=12, pady=(0, 4))
-
-        btn_w = 66 if compact else None
-
-        if not history_mode:
-            ctk.CTkButton(actions, text="Commitar", width=btn_w or 90, command=self._commit).pack(side="left", padx=(0, 4 if compact else 6))
-            ctk.CTkButton(actions, text="Push", width=btn_w or 70, command=self._push).pack(side="left", padx=(0, 4 if compact else 6))
-            ctk.CTkButton(actions, text="Sincronizar", width=btn_w or 100, command=self._sync).pack(side="left", padx=(0, 4 if compact else 6))
-            if self.manageable:
-                enabled = entry.get("enabled", True)
-                self.toggle_btn = ctk.CTkButton(actions, text="Desativar" if enabled else "Ativar", width=btn_w or 90,
-                                                 fg_color="gray50", command=self._toggle_enabled)
-                self.toggle_btn.pack(side="left", padx=(0, 4 if compact else 6))
-                ctk.CTkButton(actions, text="Remover", width=btn_w or 80, fg_color="#8a2c2c", hover_color="#6f2323",
-                              command=self._remove).pack(side="left", padx=(0, 4 if compact else 6))
-            else:
-                ctk.CTkButton(actions, text="Ignorar", width=btn_w or 80, fg_color="#8a2c2c",
-                              hover_color="#6f2323", command=self._exclude_from_root).pack(side="left", padx=(0, 4 if compact else 6))
-
-        self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=btn_w or 120, fg_color="transparent",
-                                         text_color=("gray20", "gray80"), hover_color=("gray85", "gray30"),
-                                         command=self._toggle_expand)
-        self.expand_btn.pack(side="left")
+            self._build_card(name, entry)
 
         self.panel = None
         self.refresh()
 
+    # ---- layout: modo "Lista" (1 por linha, tudo numa linha so) ----
+
+    def _build_list_row(self, name, entry):
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=(6, 2))
+
+        title_box = ctk.CTkFrame(header, fg_color="transparent")
+        title_box.pack(side="left", fill="x", expand=True)
+        title_row = ctk.CTkFrame(title_box, fg_color="transparent")
+        title_row.pack(anchor="w", fill="x")
+        ctk.CTkLabel(title_row, text=name, font=ctk.CTkFont(weight="bold", size=12), width=200,
+                     anchor="w").pack(side="left")
+        if not self.manageable:
+            ctk.CTkLabel(title_row, text="(via pasta)", text_color="gray",
+                         font=ctk.CTkFont(size=10, slant="italic")).pack(side="left", padx=(6, 0))
+
+        self.pending_badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
+                                           text_color="white", padx=8, width=100)
+        self.pending_badge.pack(side="left", padx=4)
+        self.badge = ctk.CTkLabel(header, text="...", corner_radius=8, fg_color="gray40",
+                                   text_color="white", padx=8, width=70)
+        self.badge.pack(side="left", padx=4)
+        self.last_push_lbl = ctk.CTkLabel(header, text="", text_color="gray", font=ctk.CTkFont(size=10))
+        self.last_push_lbl.pack(side="left", padx=4)
+
+        actions = header
+        buttons = self._button_specs(entry)
+        for text, kwargs in buttons:
+            ctk.CTkButton(actions, text=text, width=66, **kwargs).pack(side="left", padx=(0, 4))
+        self.expand_btn = ctk.CTkButton(actions, text="Ver commits ▾", width=66, fg_color="transparent",
+                                         text_color=("gray20", "gray80"), hover_color=("gray85", "gray30"),
+                                         command=self._toggle_expand)
+        self.expand_btn.pack(side="left")
+
+    # ---- layout: modo "Cards" (grade horizontal, poster estreito) ----
+
+    def _build_card(self, name, entry):
+        ctk.CTkFrame(self, width=self.CARD_WIDTH, height=1, fg_color="transparent").pack()  # forca a largura
+
+        # topo: nome + caminho
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(fill="x", padx=12, pady=(10, 6))
+        ctk.CTkLabel(top, text=name, font=ctk.CTkFont(weight="bold"), wraplength=self.CARD_WIDTH - 24,
+                     justify="left").pack(anchor="w")
+        ctk.CTkLabel(top, text=self.path, text_color="gray", font=ctk.CTkFont(size=11),
+                     wraplength=self.CARD_WIDTH - 24, justify="left").pack(anchor="w")
+        if not self.manageable:
+            ctk.CTkLabel(top, text=f"via pasta: {self.source_path}", text_color="gray",
+                         font=ctk.CTkFont(size=11, slant="italic"), wraplength=self.CARD_WIDTH - 24,
+                         justify="left").pack(anchor="w")
+
+        # meio: os 2 badges + ultimo push
+        middle = ctk.CTkFrame(self, fg_color="transparent")
+        middle.pack(fill="x", padx=12, pady=(0, 6))
+        self.pending_badge = ctk.CTkLabel(middle, text="...", corner_radius=8, fg_color="gray40",
+                                           text_color="white", padx=10, width=self.CARD_WIDTH - 24)
+        self.pending_badge.pack(fill="x", pady=(0, 4))
+        self.badge = ctk.CTkLabel(middle, text="...", corner_radius=8, fg_color="gray40",
+                                   text_color="white", padx=10, width=self.CARD_WIDTH - 24)
+        self.badge.pack(fill="x", pady=(0, 4))
+        self.last_push_lbl = ctk.CTkLabel(middle, text="ultimo push: ...", text_color="gray",
+                                           font=ctk.CTkFont(size=11))
+        self.last_push_lbl.pack(anchor="w")
+
+        # base: botoes numa mini-grade de 2 colunas + ver commits full-width
+        bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.pack(fill="x", padx=12, pady=(0, 10))
+        bottom.grid_columnconfigure((0, 1), weight=1)
+
+        buttons = self._button_specs(entry)
+        for i, (text, kwargs) in enumerate(buttons):
+            ctk.CTkButton(bottom, text=text, **kwargs).grid(
+                row=i // 2, column=i % 2, padx=3, pady=3, sticky="ew")
+
+        expand_row = (len(buttons) + 1) // 2
+        self.expand_btn = ctk.CTkButton(bottom, text="Ver commits ▾", fg_color="transparent",
+                                         text_color=("gray20", "gray80"), hover_color=("gray85", "gray30"),
+                                         command=self._toggle_expand)
+        self.expand_btn.grid(row=expand_row, column=0, columnspan=2, padx=3, pady=(6, 0), sticky="ew")
+
+    def _button_specs(self, entry):
+        """Lista de (texto, kwargs) dos botoes de acao - compartilhada entre
+        o modo Lista e o modo Cards, pra nao duplicar a lista de botoes."""
+        if self.history_mode:
+            return []
+        specs = [
+            ("Commitar", {"command": self._commit}),
+            ("Push", {"command": self._push}),
+            ("Sincronizar", {"command": self._sync}),
+        ]
+        if self.manageable:
+            enabled = entry.get("enabled", True)
+            specs.append(("Desativar" if enabled else "Ativar",
+                          {"fg_color": "gray50", "command": self._toggle_enabled}))
+            specs.append(("Remover", {"fg_color": "#8a2c2c", "hover_color": "#6f2323", "command": self._remove}))
+        else:
+            specs.append(("Ignorar", {"fg_color": "#8a2c2c", "hover_color": "#6f2323",
+                                      "command": self._exclude_from_root}))
+        return specs
+
     # ---- data ----
 
     def refresh(self):
+        if not self.winfo_exists():
+            return
         prefix = "" if self.compact else "ultimo push: "
         self.pending_badge.configure(text="...", fg_color="gray40")
         self.badge.configure(text="...", fg_color="gray40")
@@ -402,6 +459,8 @@ class RepoCard(ctk.CTkFrame):
             return entry, unpushed, pending
 
         def done(result):
+            if not self.winfo_exists():
+                return  # card foi destruido (trocou de aba) antes do refresh voltar
             if isinstance(result, Exception):
                 self.pending_badge.configure(text="erro", fg_color="#8a2c2c")
                 self.badge.configure(text="erro", fg_color="#8a2c2c")
@@ -431,11 +490,13 @@ class RepoCard(ctk.CTkFrame):
         self.panel.set_loading()
         since = _since_from_preset(self.since_preset)
         limit = 200 if self.history_mode else 5
-        run_bg(
-            lambda: core.get_commit_log(self.path, since=since, limit=limit),
-            lambda result: self.panel.set_commits([] if isinstance(result, Exception) else result),
-            self.root,
-        )
+
+        def done(result):
+            if not self.winfo_exists() or self.panel is None:
+                return
+            self.panel.set_commits([] if isinstance(result, Exception) else result)
+
+        run_bg(lambda: core.get_commit_log(self.path, since=since, limit=limit), done, self.root)
 
     def set_since_preset(self, preset):
         self.since_preset = preset
@@ -474,6 +535,8 @@ class RepoCard(ctk.CTkFrame):
         CommitReviewDialog(self.root, self.path, on_confirm, confirm_label="Commitar e enviar")
 
     def _after_action(self, result):
+        if not self.winfo_exists():
+            return
         if isinstance(result, Exception):
             messagebox.showerror("Erro", str(result))
         self.refresh()
@@ -630,9 +693,8 @@ class App(ctk.CTk):
             return
 
         compact = self.view_mode == "list"
-        for e in entries:
-            card = RepoCard(scroll, e, self, on_changed=self.show_status, compact=compact)
-            card.pack(fill="x", pady=3 if compact else 6)
+        cards = [RepoCard(scroll, e, self, on_changed=self.show_status, compact=compact) for e in entries]
+        _place_repo_cards(cards, compact)
 
     def _add_view_mode_toggle(self, parent, refresh_command):
         """Botao Lista/Card - troca self.view_mode, salva no config e
@@ -703,9 +765,8 @@ class App(ctk.CTk):
 
         compact = self.view_mode == "list"
         for e in entries:
-            card = RepoCard(scroll, e, self, on_changed=self.show_history, history_mode=True, compact=compact)
-            card.pack(fill="x", pady=3 if compact else 6)
-            cards.append(card)
+            cards.append(RepoCard(scroll, e, self, on_changed=self.show_history, history_mode=True, compact=compact))
+        _place_repo_cards(cards, compact)
 
     # ---- Agendamento view (config/monitoramento, sem commit/push manual) ----
 
@@ -738,9 +799,43 @@ class App(ctk.CTk):
             core.save_config(cfg)
             sync_target, _ = app_module.self_paths()
             core.install_schedule(sync_target, schedules=times, task_name=cfg["taskName"])
+            core.pin_schedule_agent_if_created_by_skill()
             messagebox.showinfo("OK", f"Horarios salvos e tarefa agendada atualizada: {', '.join(times)}")
 
         ctk.CTkButton(entry_row, text="Salvar e reinstalar tarefa", command=save_schedule).pack(side="left", padx=8)
+
+        ctk.CTkLabel(self.content, text="Agente de IA (gera a mensagem do commit):",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(8, 2))
+        agent_row = ctk.CTkFrame(self.content, fg_color="transparent")
+        agent_row.pack(fill="x", pady=(0, 4))
+        agent_label_by_value = {"auto": "Automatico", "claude": "Claude", "codex": "Codex", "opencode": "OpenCode"}
+        agent_value_by_label = {v: k for k, v in agent_label_by_value.items()}
+
+        def on_agent_change(label):
+            cfg["aiAgent"] = agent_value_by_label[label]
+            core.save_config(cfg)
+
+        agent_menu = ctk.CTkOptionMenu(agent_row, values=list(agent_label_by_value.values()), width=160,
+                                        command=on_agent_change)
+        agent_menu.set(agent_label_by_value.get(cfg.get("aiAgent", "auto"), "Automatico"))
+        agent_menu.pack(side="left")
+
+        schedule_agent = cfg.get("scheduleAgent")
+        if schedule_agent:
+            ctk.CTkLabel(self.content, text=f"Rodada agendada fixada em: {agent_label_by_value.get(schedule_agent, schedule_agent)} "
+                                             f"(definido quando o agendamento foi criado por uma skill)",
+                         text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w", pady=(4, 0))
+
+            def clear_schedule_agent():
+                cfg["scheduleAgent"] = None
+                core.save_config(cfg)
+                self.show_schedule()
+
+            ctk.CTkButton(self.content, text="Limpar (usar a preferencia geral na rodada agendada)",
+                          fg_color="gray40", command=clear_schedule_agent).pack(anchor="w", pady=(4, 12))
+        else:
+            ctk.CTkLabel(self.content, text="Rodada agendada usa a preferencia geral acima (nenhum agente fixado).",
+                         text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w", pady=(4, 12))
 
         ctk.CTkLabel(self.content, text=f"Tray habilitada: {'sim' if cfg.get('trayEnabled') else 'nao'}",
                      text_color="gray").pack(anchor="w", pady=(0, 6))
