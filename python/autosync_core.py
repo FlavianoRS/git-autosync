@@ -24,7 +24,12 @@ DEFAULT_CONFIG = {
     "trayEnabled": False,
     "theme": "system",
     "viewMode": "card",
+    "aiAgent": "auto",
+    "scheduleAgent": None,
 }
+
+AGENT_ORDER = ["claude", "codex", "opencode"]
+OPENCODE_SAFE_AGENT = "git-autosync-safe"
 
 
 def ensure_config_dir():
@@ -71,10 +76,10 @@ def _no_window_flags():
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
 
 
-def _run(args, cwd=None, timeout=None):
+def _run(args, cwd=None, timeout=None, input=None):
     return subprocess.run(
         args, cwd=cwd, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=timeout,
+        encoding="utf-8", errors="replace", timeout=timeout, input=input,
         **_no_window_flags(),
     )
 
@@ -161,9 +166,170 @@ def include_repo_in_root(root_path, repo_path):
     return False
 
 
-def _generate_commit_message(repo_path):
-    """Assume que ja tem alteracoes staged. Gera a mensagem via `claude`,
-    com fallback se nao tiver o CLI ou ele nao responder."""
+# ---- agentes de IA (Claude / Codex / OpenCode) pra gerar a mensagem ----
+#
+# Os 3 sao chamados com o diff ja embutido no prompt (nunca pedimos pra eles
+# "olharem o repo") - assim nenhum precisa de acesso a arquivo/shell pra
+# responder, o que evita ter que confiar 100% nas flags de sandbox de cada
+# CLI (testado na pratica: o --sandbox read-only do codex, por exemplo, falha
+# no Windows se o modelo tenta rodar git sozinho pra ler o diff - com o diff
+# ja no prompt, ele nunca tenta).
+
+def _run_claude_prompt(prompt, cwd):
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        return None
+    try:
+        proc = _run(
+            [claude_bin, "-p", prompt, "--output-format", "text",
+             "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch"],
+            cwd=cwd, timeout=120,
+        )
+        return proc.stdout.strip() or None
+    except Exception:
+        return None
+
+
+def _run_codex_prompt(prompt, cwd):
+    """`codex` no Windows e um shim .CMD (instalado via npm) - passar o
+    prompt (que tem o diff embutido, varias linhas) como argumento de linha
+    de comando corrompe/perde conteudo nesses shims. Manda via stdin (`-`
+    como prompt = le da stdin) em vez de argv."""
+    codex_bin = shutil.which("codex")
+    if not codex_bin:
+        return None
+    out_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as tmp:
+            out_path = tmp.name
+        _run(
+            [codex_bin, "exec", "--sandbox", "read-only", "--skip-git-repo-check",
+             "-C", cwd, "-o", out_path, "-"],
+            cwd=cwd, timeout=120, input=prompt,
+        )
+        text = Path(out_path).read_text(encoding="utf-8", errors="replace").strip()
+        return text or None
+    except Exception:
+        return None
+    finally:
+        if out_path:
+            try:
+                os.unlink(out_path)
+            except OSError:
+                pass
+
+
+def _ensure_opencode_safe_agent():
+    """Garante que ~/.config/opencode/opencode.json tem um agente sem
+    write/edit/bash/webfetch pra gerar a mensagem - so complementa o
+    arquivo (merge), nunca sobrescreve plugins/mcp/etc que a pessoa ja
+    tiver configurado."""
+    cfg_path = Path.home() / ".config" / "opencode" / "opencode.json"
+    try:
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if cfg_path.exists():
+            try:
+                data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        agents = data.setdefault("agent", {})
+        if OPENCODE_SAFE_AGENT not in agents:
+            agents[OPENCODE_SAFE_AGENT] = {
+                "description": "Gera texto a partir de um prompt, sem tocar em arquivos "
+                               "nem rodar comandos (usado pelo git-autosync pra gerar "
+                               "mensagem de commit).",
+                "permission": {"write": "deny", "edit": "deny", "bash": "deny", "webfetch": "deny"},
+            }
+            cfg_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _run_opencode_prompt(prompt, cwd):
+    """`opencode` no Windows tambem e um shim .CMD - mesmo motivo do codex,
+    manda o prompt via stdin (sem argumento de mensagem) em vez de argv."""
+    opencode_bin = shutil.which("opencode")
+    if not opencode_bin:
+        return None
+    _ensure_opencode_safe_agent()
+    try:
+        proc = _run(
+            [opencode_bin, "run", "--dir", cwd, "--agent", OPENCODE_SAFE_AGENT, "--format", "json"],
+            cwd=cwd, timeout=120, input=prompt,
+        )
+        text = None
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except Exception:
+                continue
+            if event.get("type") == "text":
+                part_text = (event.get("part") or {}).get("text")
+                if part_text:
+                    text = part_text
+        return text.strip() if text else None
+    except Exception:
+        return None
+
+
+_AGENT_RUNNERS = {
+    "claude": _run_claude_prompt,
+    "codex": _run_codex_prompt,
+    "opencode": _run_opencode_prompt,
+}
+
+
+def _detect_calling_agent():
+    """Best-effort: quem esta rodando este processo agora (uma skill do
+    Claude Code/Codex/OpenCode, ou nada detectavel). CLAUDECODE=1 e
+    confirmado oficialmente; os sinais de Codex/OpenCode sao best-effort -
+    se nao baterem, so cai em None (usa a preferencia geral normalmente)."""
+    if os.environ.get("CLAUDECODE") == "1":
+        return "claude"
+    if "CODEX_SANDBOX" in os.environ or "CODEX_SANDBOX_NETWORK_DISABLED" in os.environ:
+        return "codex"
+    if os.environ.get("OPENCODE") == "1":
+        return "opencode"
+    return None
+
+
+def _resolve_agent(explicit=None):
+    if explicit:
+        return explicit
+    cfg = load_config()
+    preferred = cfg.get("aiAgent", "auto")
+    if preferred and preferred != "auto":
+        return preferred
+    for name in AGENT_ORDER:
+        if shutil.which(name):
+            return name
+    return None
+
+
+def pin_schedule_agent_if_created_by_skill():
+    """Chamada quando a tarefa agendada e instalada/atualizada (install,
+    set-schedule, enable-tray). Se quem esta chamando e um agente
+    detectavel E a rodada agendada ainda nao tem um agente fixado, fixa -
+    so na primeira vez; nao sobrescreve uma escolha ja feita (por skill ou
+    manualmente)."""
+    detected = _detect_calling_agent()
+    if not detected:
+        return
+    cfg = load_config()
+    if cfg.get("scheduleAgent"):
+        return
+    cfg["scheduleAgent"] = detected
+    save_config(cfg)
+
+
+def _generate_commit_message(repo_path, agent=None):
+    """Assume que ja tem alteracoes staged. Gera a mensagem via o agente
+    resolvido (explicito, ou a preferencia configurada, ou o primeiro
+    disponivel), com fallback se nenhum estiver disponivel ou responder."""
     diff = _run(["git", "diff", "--staged"], cwd=repo_path).stdout
     if len(diff) > 12000:
         diff = diff[:12000] + "\n...(diff truncado)..."
@@ -175,22 +341,20 @@ def _generate_commit_message(repo_path):
         f"mensagem, sem aspas, sem explicacao, sem markdown.\n\n{diff}"
     )
 
+    resolved = _resolve_agent(agent)
     commit_msg = None
-    claude_bin = shutil.which("claude")
-    if claude_bin:
-        try:
-            proc = _run(
-                [claude_bin, "-p", prompt, "--output-format", "text",
-                 "--disallowedTools", "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch"],
-                cwd=repo_path, timeout=120,
-            )
-            commit_msg = proc.stdout.strip()
-        except Exception:
-            commit_msg = None
+    if resolved:
+        runner = _AGENT_RUNNERS.get(resolved)
+        if runner:
+            try:
+                commit_msg = runner(prompt, repo_path)
+            except Exception:
+                commit_msg = None
 
     if not commit_msg:
         commit_msg = f"chore: auto-commit {datetime.now():%Y-%m-%d %H:%M}"
-        write_log(repo_path, "aviso: claude nao retornou mensagem, usando fallback.")
+        write_log(repo_path, f"aviso: agente '{resolved}' nao retornou mensagem, usando fallback."
+                              if resolved else "aviso: nenhum agente de IA disponivel, usando fallback.")
     return commit_msg
 
 
@@ -208,8 +372,8 @@ def _do_commit(repo_path, message):
     return _run(["git", "rev-parse", "HEAD"], cwd=repo_path).stdout.strip() or None
 
 
-def stage_and_generate_message(repo_path):
-    """Da `git add -A` e gera a mensagem de commit (claude/fallback), SEM
+def stage_and_generate_message(repo_path, agent=None):
+    """Da `git add -A` e gera a mensagem de commit (agente/fallback), SEM
     commitar - pra revisar/editar antes de confirmar (dialogo da GUI, ou
     --review no CLI). Retorna dict: hadChanges, message (None se
     hadChanges False), error. Cancelar depois disso? chame unstage()."""
@@ -220,7 +384,7 @@ def stage_and_generate_message(repo_path):
         if not status.stdout.strip():
             return {"hadChanges": False, "message": None, "error": None}
         _run(["git", "add", "-A"], cwd=repo_path)
-        return {"hadChanges": True, "message": _generate_commit_message(repo_path), "error": None}
+        return {"hadChanges": True, "message": _generate_commit_message(repo_path, agent=agent), "error": None}
     except Exception as exc:
         return {"hadChanges": False, "message": None, "error": str(exc)}
 
@@ -276,14 +440,16 @@ def finalize_sync(repo_path, message, push_decider=None):
     return commit_result
 
 
-def commit_repo(repo_path, message=None):
+def commit_repo(repo_path, message=None, agent=None):
     """Stages and commits pending changes (no push). Returns dict: path, time,
     success, hadChanges, message, commitHash.
 
     message: mensagem customizada pro commit - quando informada, pula a
-    geracao automatica (diff + claude/fallback) e usa ela direto. Pensado
+    geracao automatica (diff + agente/fallback) e usa ela direto. Pensado
     pra acao individual (GUI/CLI de um repo so); commit_all() nao aceita,
-    ja que uma mensagem so nao faz sentido pra varios repos de uma vez."""
+    ja que uma mensagem so nao faz sentido pra varios repos de uma vez.
+    agent: forca um agente especifico ("claude"/"codex"/"opencode") pra
+    essa chamada, ignorando a preferencia configurada."""
     result = {
         "path": repo_path,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -309,7 +475,7 @@ def commit_repo(repo_path, message=None):
         result["hadChanges"] = True
         _run(["git", "add", "-A"], cwd=repo_path)
 
-        commit_msg = message or _generate_commit_message(repo_path)
+        commit_msg = message or _generate_commit_message(repo_path, agent=agent)
 
         result["commitHash"] = _do_commit(repo_path, commit_msg)
         result["success"] = True
@@ -460,20 +626,20 @@ def push_repo_checked(repo_path, push_decider=None):
     return push_repo(repo_path)
 
 
-def sync_repo(repo_path, push_decider=None, message=None):
+def sync_repo(repo_path, push_decider=None, message=None, agent=None):
     """Commit followed by push — used pela tarefa agendada e pelo comando
     `sync`. Returns dict: path, time, success, hadChanges, message.
 
     Antes de commitar, verifica se o remoto esta acessivel (ver
     _resolve_push_availability) - se nao estiver e ninguem topar tentar de
-    novo, segue so commitando, sem dar push nessa rodada. `message` (ver
-    commit_repo) so faz sentido pra chamada de um repo so."""
+    novo, segue so commitando, sem dar push nessa rodada. `message`/`agent`
+    (ver commit_repo) so fazem sentido pra chamada de um repo so."""
     proceed, _ = _resolve_push_availability(repo_path, push_decider)
     skip_push = not proceed
     if skip_push:
         write_log(repo_path, "aviso: remoto inacessivel, commitando sem dar push nesta rodada.")
 
-    commit_result = commit_repo(repo_path, message=message)
+    commit_result = commit_repo(repo_path, message=message, agent=agent)
     if not commit_result["success"] or not commit_result["hadChanges"] or skip_push:
         result = {k: commit_result[k] for k in ("path", "time", "success", "hadChanges", "message")}
         result["pushed"] = False
@@ -499,14 +665,19 @@ def _update_status_entry(status, repo_path, **fields):
     return entry
 
 
-def run_all(push_decider=None):
+def run_all(push_decider=None, agent=None):
     """Commit + push every enabled target — used by the scheduled task and
-    the `run-now` CLI command. Ver sync_repo() pro que push_decider faz."""
+    the `run-now` CLI command. Ver sync_repo() pro que push_decider faz.
+
+    agent explicito (ex: --agent no CLI) tem prioridade; sem ele, usa
+    cfg["scheduleAgent"] (se fixado - ver pin_schedule_agent_if_created_by_skill);
+    sem os dois, cada commit resolve o agente normalmente (cfg["aiAgent"]/auto)."""
     cfg = load_config()
     paths = resolve_targets(cfg.get("targets", []))
+    resolved_agent = agent or cfg.get("scheduleAgent")
     status = load_status()
     for p in paths:
-        r = sync_repo(p, push_decider=push_decider)
+        r = sync_repo(p, push_decider=push_decider, agent=resolved_agent)
         _update_status_entry(
             status, p,
             lastRun=r["time"], success=r["success"],
@@ -519,14 +690,14 @@ def run_all(push_decider=None):
     return status
 
 
-def commit_all():
+def commit_all(agent=None):
     """Commit-only pass over every enabled target (no push) — used by the
     manual 'Commitar tudo' action in the GUI/CLI."""
     cfg = load_config()
     paths = resolve_targets(cfg.get("targets", []))
     status = load_status()
     for p in paths:
-        r = commit_repo(p)
+        r = commit_repo(p, agent=agent)
         _update_status_entry(
             status, p,
             lastRun=r["time"], success=r["success"],

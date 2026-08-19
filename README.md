@@ -1,10 +1,11 @@
 # Git AutoSync
 
 Ferramenta que varre repositórios git configurados e, quando encontra alterações,
-gera uma mensagem de commit (via `claude` CLI, com fallback automático), faz commit
-e dá `push`. A rodada **agendada** (Task Scheduler/cron) faz commit + push sozinha,
-sem intervenção. As ações **manuais** (GUI ou CLI) vêm separadas: primeiro commita
-(pra você revisar a mensagem gerada), depois você decide se dá push.
+gera uma mensagem de commit (via **Claude, Codex ou OpenCode** — o que estiver
+instalado/preferido, com fallback automático), faz commit e dá `push`. A rodada
+**agendada** (Task Scheduler/cron) faz commit + push sozinha, sem intervenção. As
+ações **manuais** (GUI ou CLI) vêm separadas: primeiro commita (pra você revisar a
+mensagem gerada), depois você decide se dá push.
 
 Versão atual e mantida: **`python/`** (multiplataforma — Windows e Linux).
 `legacy/` guarda a versão original em PowerShell (Windows-only), mantida só como
@@ -90,8 +91,10 @@ Sidebar com:
   `Push`/`Sincronizar` verificam se o remoto está acessível antes — se não
   estiver, um popup oferece tentar de novo ou desistir (cancelar o push, ou
   seguir só commitando, dependendo do botão). Botão **▤ Lista / ▦ Cards** no
-  topo troca entre o card detalhado (padrão) e uma linha compacta por
-  repositório — preferência salva no `config.json` (`viewMode`).
+  topo troca entre dois layouts — preferência salva no `config.json`
+  (`viewMode`): **Cards** organiza numa grade horizontal (vários por linha,
+  nome no topo/badges no meio/botões na base); **Lista** é uma linha
+  compacta por repositório.
 - **Histórico** — os mesmos cards em modo leitura, com filtro de período
   (7 dias / 30 dias / 90 dias / tudo), expansíveis pra ver o log completo de
   cada repositório, com o mesmo alternador Lista/Cards.
@@ -103,6 +106,30 @@ Sidebar com:
 No fim da sidebar tem um seletor **Tema: Sistema / Claro / Escuro** — troca a
 aparência na hora, sem reiniciar, e salva a escolha (`theme` no
 `config.json`).
+
+Na aba **Agendamento** também tem o seletor de **Agente de IA** (Automático /
+Claude / Codex / OpenCode) — ver seção abaixo.
+
+## Qual IA gera a mensagem do commit
+
+Suporta **Claude**, **Codex** e **OpenCode** — detecta o que estiver instalado
+e usa (ordem padrão: Claude → Codex → OpenCode), ou force um deles em
+"Agente de IA" na aba Agendamento da GUI, `set-agent` no CLI, ou `--agent` só
+numa chamada. Os três são chamados com o diff já embutido no prompt (nunca
+pedimos pra eles "olharem o repositório"), então nenhum precisa de acesso a
+arquivo/shell pra responder:
+
+- **Claude**: `claude -p ... --disallowedTools ...` — sem ferramenta nenhuma.
+- **Codex**: `codex exec --sandbox read-only` — só leitura, sem escrita/execução.
+- **OpenCode**: usa um agente restrito (`git-autosync-safe`, sem
+  write/edit/bash/webfetch) que o próprio git-autosync cria/mantém em
+  `~/.config/opencode/opencode.json` (sem tocar no resto do seu config).
+
+**Quando o agendamento é criado através de uma skill** (Claude Code/Codex
+rodando `install`/`set-schedule` via chat), a rodada agendada fica fixada
+nesse mesmo agente — não na preferência geral, que pode nunca ter sido
+configurada. Isso acontece uma vez só, na primeira criação; pra mudar depois,
+use "Limpar" na aba Agendamento ou edite `scheduleAgent` com `set-agent`.
 
 ## Aviso de falha na rodada agendada
 
@@ -131,6 +158,7 @@ python app.py install                     # instala/atualiza a tarefa agendada (
 python app.py uninstall                   # remove tarefa agendada e autostart da tray
 python app.py enable-tray                 # instala tarefa agendada + autostart da bandeja no login
 python app.py disable-tray
+python app.py set-agent codex             # preferencia geral de agente: auto | claude | codex | opencode
 python app.py --version
 ```
 
@@ -160,6 +188,8 @@ python app.py commit --review   # mostra a mensagem gerada, deixa usar/editar/ca
 python app.py sync --review     # idem, e só dá push depois de confirmar
 
 python app.py preview            # so gera e mostra a mensagem, sem commitar nada (nem deixa staged)
+
+python app.py commit --agent opencode   # forca um agente so nesta chamada (nao altera a preferencia salva)
 ```
 
 Em `--review`, escolher `[E] editar` abre seu editor de texto de verdade

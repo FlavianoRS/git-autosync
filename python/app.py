@@ -116,7 +116,15 @@ def cmd_set_schedule(args):
     core.save_config(cfg)
     sync_target, _ = self_paths()
     core.install_schedule(sync_target, schedules=times, task_name=cfg["taskName"])
+    core.pin_schedule_agent_if_created_by_skill()
     print(f"Horarios atualizados: {', '.join(times)}")
+
+
+def cmd_set_agent(args):
+    cfg = core.load_config()
+    cfg["aiAgent"] = args.agent
+    core.save_config(cfg)
+    print(f"Agente de IA (preferencia geral): {args.agent}")
 
 
 def _make_cli_push_decider(cancel_label):
@@ -247,12 +255,12 @@ def cmd_commit(args):
     _check_review_args(args)
     if args.all:
         print("Verificando e commitando (sem push) em todos os alvos configurados...")
-        _print_batch_result(core.commit_all())
+        _print_batch_result(core.commit_all(agent=args.agent))
         return
 
     path = _resolve_repo_arg(args.repo)
     if args.review:
-        staged = core.stage_and_generate_message(path)
+        staged = core.stage_and_generate_message(path, agent=args.agent)
         if staged["error"]:
             print(f"[ERRO] {path}: {staged['error']}")
             return
@@ -266,7 +274,7 @@ def cmd_commit(args):
             return
         r = core.finalize_commit(path, message)
     else:
-        r = core.commit_repo(path, message=args.message)
+        r = core.commit_repo(path, message=args.message, agent=args.agent)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -286,12 +294,12 @@ def cmd_sync(args):
     _check_review_args(args)
     if args.all:
         print("Rodando sync (commit + push) em todos os alvos configurados...")
-        _print_batch_result(core.run_all(push_decider=_cli_sync_decider))
+        _print_batch_result(core.run_all(push_decider=_cli_sync_decider, agent=args.agent))
         return
 
     path = _resolve_repo_arg(args.repo)
     if args.review:
-        staged = core.stage_and_generate_message(path)
+        staged = core.stage_and_generate_message(path, agent=args.agent)
         if staged["error"]:
             print(f"[ERRO] {path}: {staged['error']}")
             return
@@ -305,7 +313,7 @@ def cmd_sync(args):
             return
         r = core.finalize_sync(path, message, push_decider=_cli_sync_decider)
     else:
-        r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message)
+        r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message, agent=args.agent)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
 
@@ -352,6 +360,7 @@ def cmd_install(args):
     cfg = core.load_config()
     sync_target, _ = self_paths()
     core.install_schedule(sync_target, schedules=cfg["schedules"], task_name=cfg["taskName"])
+    core.pin_schedule_agent_if_created_by_skill()
     print(f"Tarefa agendada instalada/atualizada: {', '.join(cfg['schedules'])}")
 
 
@@ -537,6 +546,8 @@ def build_parser():
     p.add_argument("--review", action="store_true",
                    help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar "
                         "(terminal interativo; nao pode ser usado com --all/--message)")
+    p.add_argument("--agent", choices=["claude", "codex", "opencode"],
+                   help="forca esse agente so nesta chamada (sem isso, usa a preferencia configurada)")
     p.set_defaults(func=cmd_commit)
 
     p = sub.add_parser("push", help="da push do que ja foi commitado (o repo atual por padrao)")
@@ -554,7 +565,13 @@ def build_parser():
     p.add_argument("--review", action="store_true",
                    help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar e enviar "
                         "(terminal interativo; nao pode ser usado com --all/--message)")
+    p.add_argument("--agent", choices=["claude", "codex", "opencode"],
+                   help="forca esse agente so nesta chamada (sem isso, usa scheduleAgent/aiAgent)")
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("set-agent", help="define o agente de IA preferido pra gerar mensagem de commit")
+    p.add_argument("agent", choices=["auto", "claude", "codex", "opencode"])
+    p.set_defaults(func=cmd_set_agent)
 
     p = sub.add_parser("preview", help="gera a mensagem do commit e mostra, sem commitar nada (repo atual por padrao)")
     p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")

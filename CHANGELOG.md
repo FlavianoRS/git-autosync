@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.10.0
+
+- **Escolha do agente de IA** que gera a mensagem de commit — Claude, Codex
+  ou OpenCode (antes era só Claude):
+  - `set-agent {auto,claude,codex,opencode}` (preferência geral, CLI) e o
+    seletor "Agente de IA" na aba Agendamento da GUI.
+  - `--agent` em `commit`/`sync` força um agente só naquela chamada.
+  - Quando o agendamento é criado **através de uma skill**, a rodada
+    agendada fixa automaticamente o agente que a criou (`scheduleAgent`),
+    em vez de depender da preferência geral — só na primeira vez.
+  - Os três são chamados com o diff sempre embutido no prompt (nunca pedem
+    pra "olhar o repo"), então nenhum precisa de acesso a arquivo/shell pra
+    responder — Claude com `--disallowedTools`, Codex com
+    `--sandbox read-only`, OpenCode com um agente restrito
+    (`git-autosync-safe`) que o próprio git-autosync cria em
+    `~/.config/opencode/opencode.json` sem tocar no resto do arquivo.
+  - **Fix real encontrado testando**: no Windows, `codex`/`opencode` são
+    shims `.CMD` (instalados via npm) — passar o prompt (multilinha, com o
+    diff) como argumento de linha de comando perdia/corrompia o conteúdo.
+    Os dois agora recebem o prompt via stdin.
+- **Cards em grade horizontal**: no modo "Cards" (Status/Histórico), os
+  cards agora ficam em várias colunas por linha (nome no topo, os 2 badges
+  no meio, botões numa mini-grade na base), em vez de 1 por linha. Modo
+  "Lista" não muda.
+- **Fix**: corrida ao trocar de aba com atualizações de card ainda em
+  andamento em background podia jogar `TclError` no console (mesma
+  categoria do fix de `run_bg` da versão anterior, agora cobrindo também
+  os próprios widgets do card, não só a janela principal).
+
 ## 3.9.0
 
 - **Notificação nativa do Windows quando o push falha na rodada agendada** —
