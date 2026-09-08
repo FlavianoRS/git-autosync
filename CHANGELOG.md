@@ -1,5 +1,32 @@
 # Changelog
 
+## 4.0.0
+
+- Resultados agora distinguem sincronização completa de `pending_push`; remoto
+  indisponível ou push falho retorna erro, preserva commit local e é tentado
+  novamente mesmo sem novas alterações.
+- Stage do usuário preservado por índice Git privado. Prévia cancelada, hook
+  rejeitado ou conteúdo alterado após revisão não destroem staging existente.
+- Locks entre processos por repositório e por estado impedem rodadas
+  concorrentes. Configuração/status usam escrita atômica e merge com detecção de
+  snapshots obsoletos; logs têm rotação e redação de segredos.
+- Preflight bloqueia conflitos, operações Git em andamento, HEAD destacado,
+  branch fora da política, arquivos sensíveis e arquivos acima do limite.
+- IA passa a ser opt-in: `set-ai on|off`. `set-policy` controla branches,
+  include/exclude, tamanho máximo e IA por repositório. Diff enviado não usa
+  filtros externos e tem limite de 12.000 caracteres.
+- Novo `doctor [--network]` valida Git, configuração, repositórios, remotos e
+  instalação do agendamento. CLI e execução agendada retornam código de erro em
+  falhas reais; GUI também exibe operações individuais/em lote incompletas.
+- Tokens GitLab vinculados ao host ficam em DPAPI no Windows ou Secret Service
+  no Linux. Variáveis de ambiente exigem token e host autorizado; token legado
+  em texto puro é recusado.
+- Agendamento validado, com rollback da definição anterior se atualização
+  falhar. Processos recebem timeout real e execução não interativa.
+- Instalador Python cria release imutável identificada por versão + hash em
+  `~/.git-autosync/releases`; CLI, GUI, tray e agendamento usam essa cópia.
+- CI executa suíte de integração em Windows/Linux com Python 3.9 e 3.12.
+
 ## 3.10.0
 
 - **Escolha do agente de IA** que gera a mensagem de commit — Claude, Codex

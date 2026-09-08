@@ -1,16 +1,17 @@
 ---
 name: git-autosync
-version: 3.10.0
+version: 4.0.0
 description: Gerencia o sistema de commit+push automatico (Git AutoSync) - status, horarios, diretorios monitorados, instalacao da tarefa agendada/cron e da tray. Cross-platform (Windows/Linux), auto-contido nesta pasta de skill.
 ---
 
 Skill auto-contida: todo o codigo necessario esta em `scripts/` dentro desta mesma
-pasta de skill (`app.py`, `autosync_core.py`, `gui.py`, `run_sync.py`). Essa pasta e
+pasta de skill (`app.py`, `autosync_core.py`, `gui.py`, `run_sync.py`,
+`runtime_safety.py`, `scheduler.py`, `credentials.py`). Essa pasta e
 gerada pelo instalador do projeto (`installer/install.py`) a partir de `python/` no
 repositorio `git-autosync` — nao edite os arquivos aqui na mao, edite o repositorio e
 rode o instalador de novo.
 
-Faz commit (mensagem gerada via `claude -p`) e push automatico em repositorios git
+Faz commit (fallback local ou IA explicitamente autorizada) e push automatico em repositorios git
 configurados, em horarios agendados (Task Scheduler no Windows / cron no Linux) e/ou
 por um icone na bandeja do sistema.
 
@@ -27,8 +28,8 @@ autosync", "abrir a interface do autosync".
 - Git na PATH.
 - Opcional, so para GUI/tray: `pip install -r requirements.txt` (customtkinter +
   pystray + Pillow) dentro da pasta `scripts/` desta skill.
-- Opcional: `claude` CLI na PATH, para gerar a mensagem de commit automaticamente; sem
-  ela o script usa uma mensagem fallback (`chore: auto-commit <data>`).
+- Opcional: Claude, Codex ou OpenCode na PATH. Envio de diff vem desabilitado;
+  `set-ai on` autoriza uso do agente escolhido. Sem autorização, usa fallback local.
 
 Estado do usuario (config/alvos/log) fica sempre em `~/.git-autosync/` (fora da skill,
 por pessoa) - nunca dentro da pasta da skill. Isso e o que torna a skill compartilhavel
@@ -78,6 +79,9 @@ de `python app.py` nos comandos abaixo.
 <python> "<script>" push [--repo <caminho> | --all]                                # da push do que ja foi commitado
 <python> "<script>" sync [--repo <caminho> | --all] [-m "mensagem" | --review] [--agent X]     # commit + push de verdade
 <python> "<script>" set-agent {auto,claude,codex,opencode}   # preferencia geral de agente pra gerar mensagem
+<python> "<script>" set-ai {on,off}                         # autoriza/revoga envio de diff a IA
+<python> "<script>" set-policy --repo <repo> [--branch GLOB] [--include GLOB] [--exclude GLOB] [--max-file-bytes N] [--ai on|off]
+<python> "<script>" doctor [--network]                      # diagnostico sem alterar config/agendamento
 <python> "<script>" history --since 7d          # ou 30d / 90d / all, --repo <caminho>, --json
 <python> "<script>" install            # so a tarefa agendada/cron
 <python> "<script>" enable-tray        # tarefa agendada/cron + tray com autostart no login
@@ -99,7 +103,8 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
   gerar nada via IA - use quando o usuario ditar a mensagem que quer no chat.
   Nao pode ser combinado com `--all`.
 - A mensagem gerada automaticamente pode vir de Claude, Codex ou OpenCode
-  (`set-agent` define a preferencia geral; `--agent` forca so numa chamada).
+  somente depois de `set-ai on` (`set-agent` define a preferencia geral;
+  `--agent` forca so numa chamada). Sem autorizacao, usa fallback local.
   Quando `install`/`set-schedule` rodam atraves desta skill, o agente que
   esta rodando a skill agora (Claude Code, Codex ou - se suportado -
   OpenCode) fica fixado pra rodada agendada automaticamente, na primeira
@@ -110,7 +115,7 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
 - Quando o usuario quiser ver/editar a mensagem antes de commitar (e voce
   esta rodando via chamada de ferramenta, sem terminal interativo): use
   `preview` primeiro - ele gera a mensagem e mostra, sem commitar nem deixar
-  nada staged (sempre desfaz o `git add` que faz internamente pra gerar).
+  nada staged. A previa usa um indice Git privado e preserva o stage existente.
   Mostre essa mensagem pro usuario no chat, deixe ele pedir ajuste se quiser,
   e só depois rode `commit -m "<mensagem final>"` (ou `sync -m "..."` se ele
   tambem quiser publicar). Nunca commite sem mostrar a mensagem gerada
@@ -136,7 +141,9 @@ interativa — prefira sempre os subcomandos de CLI acima para responder no chat
   nao tem como essa pergunta ser respondida por voce, avise o usuario que
   precisa responder no terminal. Sem terminal interativo (chamado via
   script/tool call, que e o seu caso), ele so avisa e segue (commitando sem
-  dar push, ou cancelando o push), sem travar.
+  dar push, ou cancelando o push), sem travar. Commit local sem push fica
+  `pending_push` e o comando retorna codigo diferente de zero; nao anuncie
+  sincronizacao concluida nesse caso.
 - Em maquina nova, apos instalar a skill: nao ha config previo. Primeiro comando
   ja cria `~/.git-autosync/config.json` vazio (sem alvos) - use `add` para configurar
   os diretorios da pessoa antes de `install`/`sync --all`.
