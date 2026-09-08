@@ -4,7 +4,9 @@ status por repositorio + historico de commits + agendamento + log.
 Todo acesso ao git roda em background thread (run_bg) — a janela nunca trava
 enquanto um commit/push/consulta de log esta em andamento.
 """
+import os
 import threading
+import webbrowser
 from datetime import datetime
 from tkinter import filedialog, messagebox
 
@@ -166,6 +168,109 @@ def make_gui_push_decider(root, give_up_label="Apenas commit"):
     return decider
 
 
+class PushFixDialog(ctk.CTkToplevel):
+    """Popup mostrado quando um `git push` falha por um motivo com correcao
+    conhecida (ver core.diagnose_push_failure) - mostra o comando sugerido
+    e deixa executar na hora ou so cancelar (nunca corrige sem essa
+    confirmacao explicita)."""
+
+    def __init__(self, master, repo_path, explain, cmd, on_choice):
+        super().__init__(master)
+        self.title("Push falhou - corrigir?")
+        self.geometry("520x240")
+        self.resizable(False, False)
+        _set_window_icon(self)
+        self.on_choice = on_choice
+        self.protocol("WM_DELETE_WINDOW", lambda: self._choose(False))
+
+        ctk.CTkLabel(self, text="Push falhou:", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=16, pady=(20, 2))
+        ctk.CTkLabel(self, text=repo_path, text_color="gray", wraplength=480, justify="left").pack(
+            anchor="w", padx=16)
+        ctk.CTkLabel(self, text=explain, wraplength=480, justify="left").pack(
+            anchor="w", padx=16, pady=(8, 0))
+
+        ctk.CTkLabel(self, text="Comando sugerido:", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=16, pady=(12, 2))
+        ctk.CTkLabel(self, text=cmd, font=ctk.CTkFont(family="Consolas", size=12),
+                     wraplength=480, justify="left").pack(anchor="w", padx=16)
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=20)
+        ctk.CTkButton(row, text="Executar agora", width=160, command=lambda: self._choose(True)).pack(
+            side="left", padx=6)
+        ctk.CTkButton(row, text="Cancelar", width=160, fg_color="gray40",
+                      command=lambda: self._choose(False)).pack(side="left", padx=6)
+
+        self.grab_set()
+
+    def _choose(self, run):
+        self.on_choice(run)
+        self.destroy()
+
+
+def make_gui_autofix_confirm(root):
+    """Fabrica um autofix_confirm (ver core.push_repo_with_autofix) que pede
+    pro thread principal abrir o PushFixDialog e espera a resposta."""
+
+    def confirm(repo_path, kind, explain, cmd):
+        result = {"run": False}
+        answered = threading.Event()
+
+        def on_choice(run):
+            result["run"] = run
+            answered.set()
+
+        root.after(0, lambda: PushFixDialog(root, repo_path, explain, cmd, on_choice))
+        answered.wait()
+        return result["run"]
+
+    return confirm
+
+
+class CreateMRDialog(ctk.CTkToplevel):
+    """Aberto pelo botao "Criar MR": pede branch de destino (pre-preenchida
+    com a config) e titulo opcional, depois chama core.create_merge_request
+    em background (a branch protegida so aceita mudanca via MR, nunca push
+    direto)."""
+
+    def __init__(self, master, repo_path, on_confirm):
+        super().__init__(master)
+        self.title("Criar Merge Request")
+        self.geometry("480x280")
+        self.resizable(False, False)
+        _set_window_icon(self)
+        self.on_confirm = on_confirm
+
+        cfg = core.load_config()
+        default_target = cfg.get("mrTargetBranch", "main")
+
+        ctk.CTkLabel(self, text=repo_path, text_color="gray", wraplength=440, justify="left").pack(
+            anchor="w", padx=16, pady=(16, 10))
+
+        ctk.CTkLabel(self, text="Branch de destino (protegida, ex: main):").pack(anchor="w", padx=16)
+        self.target_var = ctk.StringVar(value=default_target)
+        ctk.CTkEntry(self, textvariable=self.target_var, width=200).pack(anchor="w", padx=16, pady=(2, 10))
+
+        ctk.CTkLabel(self, text="Titulo (opcional - default: '<origem> -> <destino>'):").pack(anchor="w", padx=16)
+        self.title_var = ctk.StringVar()
+        ctk.CTkEntry(self, textvariable=self.title_var, width=440).pack(anchor="w", padx=16, pady=(2, 16))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(pady=8)
+        ctk.CTkButton(row, text="Criar MR", width=160, command=self._confirm).pack(side="left", padx=6)
+        ctk.CTkButton(row, text="Cancelar", width=160, fg_color="gray40", command=self.destroy).pack(
+            side="left", padx=6)
+
+        self.grab_set()
+
+    def _confirm(self):
+        target = self.target_var.get().strip() or "main"
+        title = self.title_var.get().strip() or None
+        self.destroy()
+        self.on_confirm(target, title)
+
+
 class CommitReviewDialog(ctk.CTkToplevel):
     """Aberto antes de cada Commitar/Sincronizar individual: fica staging +
     gerando a mensagem (via IA/fallback) em background e mostra o resultado
@@ -206,6 +311,9 @@ class CommitReviewDialog(ctk.CTkToplevel):
         run_bg(lambda: core.stage_and_generate_message(repo_path), self._on_staged, master)
 
     def _on_staged(self, result):
+        if not self.winfo_exists():
+            core.unstage(self.repo_path)
+            return
         self.textbox.configure(state="normal")
         self.textbox.delete("1.0", "end")
 
@@ -430,6 +538,7 @@ class RepoCard(ctk.CTkFrame):
             ("Commitar", {"command": self._commit}),
             ("Push", {"command": self._push}),
             ("Sincronizar", {"command": self._sync}),
+            ("Criar MR", {"fg_color": "#2a5d8a", "hover_color": "#204a70", "command": self._create_mr}),
         ]
         if self.manageable:
             enabled = entry.get("enabled", True)
@@ -525,20 +634,42 @@ class RepoCard(ctk.CTkFrame):
 
     def _push(self):
         decider = make_gui_push_decider(self.root, give_up_label="Cancelar")
-        run_bg(lambda: core.push_repo_checked(self.path, push_decider=decider), lambda r: self._after_action(r), self.root)
+        autofix = make_gui_autofix_confirm(self.root)
+        run_bg(lambda: core.push_repo_checked(self.path, push_decider=decider, autofix_confirm=autofix),
+               lambda r: self._after_action(r), self.root)
 
     def _sync(self):
         def on_confirm(message):
             decider = make_gui_push_decider(self.root, give_up_label="Apenas commit")
-            run_bg(lambda: core.finalize_sync(self.path, message, push_decider=decider),
+            autofix = make_gui_autofix_confirm(self.root)
+            run_bg(lambda: core.finalize_sync(self.path, message, push_decider=decider, autofix_confirm=autofix),
                    lambda r: self._after_action(r), self.root)
         CommitReviewDialog(self.root, self.path, on_confirm, confirm_label="Commitar e enviar")
+
+    def _create_mr(self):
+        def on_confirm(target, title):
+            def done(result):
+                if not self.winfo_exists():
+                    return
+                if isinstance(result, Exception):
+                    messagebox.showerror("Erro", str(result))
+                elif result["success"]:
+                    if messagebox.askyesno("MR pronta", f"{result['message']}\n\nAbrir no navegador?"):
+                        webbrowser.open(result["url"])
+                else:
+                    messagebox.showerror("Erro ao criar MR", result["message"])
+                self.refresh()
+            run_bg(lambda: core.create_merge_request(self.path, target_branch=target, title=title),
+                   done, self.root)
+        CreateMRDialog(self.root, self.path, on_confirm)
 
     def _after_action(self, result):
         if not self.winfo_exists():
             return
         if isinstance(result, Exception):
             messagebox.showerror("Erro", str(result))
+        elif not result.get("success"):
+            messagebox.showerror("Operacao nao concluida", result.get("message", "Falha desconhecida."))
         self.refresh()
         if self.expanded:
             self._load_commits()
@@ -715,18 +846,28 @@ class App(ctk.CTk):
 
     def _push_all(self):
         decider = make_gui_push_decider(self, give_up_label="Cancelar")
-        self._run_global_action(lambda: core.push_all(push_decider=decider), "Push em lote concluido.")
+        autofix = make_gui_autofix_confirm(self)
+        self._run_global_action(lambda: core.push_all(push_decider=decider, autofix_confirm=autofix),
+                                 "Push em lote concluido.")
 
     def _sync_all(self):
         decider = make_gui_push_decider(self, give_up_label="Apenas commit")
-        self._run_global_action(lambda: core.run_all(push_decider=decider), "Sincronizacao em lote concluida.")
+        autofix = make_gui_autofix_confirm(self)
+        self._run_global_action(lambda: core.run_all(push_decider=decider, autofix_confirm=autofix),
+                                 "Sincronizacao em lote concluida.")
 
     def _run_global_action(self, fn, done_message):
         def done(result):
             if isinstance(result, Exception):
                 messagebox.showerror("Erro", str(result))
             else:
-                messagebox.showinfo("Concluido", done_message)
+                failures = [(path, item.get("message", "falha")) for path, item in result.get("repos", {}).items()
+                            if not item.get("success")]
+                if failures:
+                    details = "\n".join(f"{Path(path).name}: {message}" for path, message in failures[:8])
+                    messagebox.showerror("Operacao incompleta", details)
+                else:
+                    messagebox.showinfo("Concluido", done_message)
             self.show_status()
 
         run_bg(fn, done, self)
@@ -795,10 +936,12 @@ class App(ctk.CTk):
             if not times:
                 messagebox.showerror("Erro", "Informe ao menos um horario HH:mm.")
                 return
-            cfg["schedules"] = times
-            core.save_config(cfg)
             sync_target, _ = app_module.self_paths()
-            core.install_schedule(sync_target, schedules=times, task_name=cfg["taskName"])
+            try:
+                core.install_schedule(sync_target, schedules=times, task_name=cfg["taskName"])
+            except Exception as exc:
+                messagebox.showerror("Erro ao instalar agendamento", str(exc))
+                return
             core.pin_schedule_agent_if_created_by_skill()
             messagebox.showinfo("OK", f"Horarios salvos e tarefa agendada atualizada: {', '.join(times)}")
 
@@ -819,6 +962,13 @@ class App(ctk.CTk):
                                         command=on_agent_change)
         agent_menu.set(agent_label_by_value.get(cfg.get("aiAgent", "auto"), "Automatico"))
         agent_menu.pack(side="left")
+        ai_var = ctk.BooleanVar(value=cfg.get("aiEnabled", False))
+        def change_ai():
+            current = core.load_config()
+            current["aiEnabled"] = bool(ai_var.get())
+            core.save_config(current)
+        ctk.CTkCheckBox(agent_row, text="Permitir envio do diff a IA", variable=ai_var,
+                        command=change_ai).pack(side="left", padx=12)
 
         schedule_agent = cfg.get("scheduleAgent")
         if schedule_agent:
@@ -866,6 +1016,68 @@ class App(ctk.CTk):
         ctk.CTkButton(tray_row, text="Desabilitar tray", fg_color="gray40", command=disable_tray).pack(side="left", padx=(0, 6))
         ctk.CTkButton(tray_row, text="Desinstalar tudo", fg_color="#8a2c2c", hover_color="#6f2323",
                       command=uninstall_all).pack(side="left", padx=(0, 6))
+
+        # ---- integracao GitLab (Merge Request pra branch protegida) ----
+
+        ctk.CTkLabel(self.content, text="Integracao GitLab (Merge Requests):",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", pady=(20, 2))
+        ctk.CTkLabel(self.content, text="Necessaria pro botao 'Criar MR' dos cards - branch protegida (ex: main) "
+                                         "nao aceita push direto, so via Merge Request.",
+                     text_color="gray", wraplength=640, justify="left", font=ctk.CTkFont(size=11)).pack(
+            anchor="w", pady=(0, 6))
+
+        has_env_token = bool(os.environ.get(core.GITLAB_TOKEN_ENV))
+        has_cfg_token = bool(cfg.get("gitlabCredential"))
+        if has_env_token:
+            token_status = f"token ativo via variavel de ambiente {core.GITLAB_TOKEN_ENV} (tem prioridade)"
+        elif has_cfg_token:
+            token_status = f"token protegido para {cfg.get('gitlabHost', '')}"
+        else:
+            token_status = "nenhum token configurado ainda"
+        ctk.CTkLabel(self.content, text=token_status, text_color="gray", font=ctk.CTkFont(size=11)).pack(anchor="w")
+
+        token_row = ctk.CTkFrame(self.content, fg_color="transparent")
+        token_row.pack(fill="x", pady=(4, 4))
+        token_var = ctk.StringVar()
+        host_var = ctk.StringVar(value=cfg.get("gitlabHost", ""))
+        ctk.CTkEntry(token_row, textvariable=host_var, width=200,
+                     placeholder_text="gitlab.empresa.com").pack(side="left", padx=4)
+        ctk.CTkEntry(token_row, textvariable=token_var, width=280, show="*",
+                     placeholder_text="Personal Access Token (escopo 'api')").pack(side="left")
+
+        def save_token():
+            t = token_var.get().strip()
+            if not t:
+                messagebox.showerror("Erro", "Informe um token.")
+                return
+            try:
+                core.set_gitlab_token(t, host_var.get())
+            except Exception as exc:
+                messagebox.showerror("Erro ao salvar token", str(exc))
+                return
+            messagebox.showinfo("OK", "Token protegido e vinculado ao host informado.")
+            self.show_schedule()
+
+        def clear_token():
+            core.clear_gitlab_token()
+            messagebox.showinfo("OK", "Token removido.")
+            self.show_schedule()
+
+        ctk.CTkButton(token_row, text="Salvar", width=90, command=save_token).pack(side="left", padx=(8, 4))
+        ctk.CTkButton(token_row, text="Remover", width=90, fg_color="gray40", command=clear_token).pack(side="left")
+
+        target_row = ctk.CTkFrame(self.content, fg_color="transparent")
+        target_row.pack(fill="x", pady=(10, 4))
+        ctk.CTkLabel(target_row, text="Branch destino padrao das MRs:").pack(side="left")
+        mr_target_var = ctk.StringVar(value=cfg.get("mrTargetBranch", "main"))
+        ctk.CTkEntry(target_row, textvariable=mr_target_var, width=140).pack(side="left", padx=8)
+
+        def save_mr_target():
+            cfg["mrTargetBranch"] = mr_target_var.get().strip() or "main"
+            core.save_config(cfg)
+            messagebox.showinfo("OK", "Salvo.")
+
+        ctk.CTkButton(target_row, text="Salvar", width=90, command=save_mr_target).pack(side="left")
 
     # ---- Log view ----
 
