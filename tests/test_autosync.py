@@ -194,7 +194,17 @@ class GitIntegration(unittest.TestCase):
 
     def test_scheduler_exit_failure(self):
         with patch.object(core, "run_all", return_value={"repos": {"repo": {"success": False, "message": "pending"}}}), patch.object(core, "notify_windows"):
-            self.assertEqual(run_sync.main(), 1)
+            self.assertEqual(run_sync.main([]), 1)
+
+    def test_scheduler_refuses_unknown_argument(self):
+        # Ate a 4.0.0 este executavel ignorava sys.argv: um `--version` de diagnostico
+        # sincronizava e commitava todos os alvos. Argumento estranho nao pode chegar
+        # perto de run_all.
+        with patch.object(core, "run_all") as run_all:
+            self.assertEqual(run_sync.main(["--version"]), 0)
+            self.assertEqual(run_sync.main(["--repo", "C:\\qualquer"]), 2)
+            self.assertEqual(run_sync.main(["sync"]), 2)
+            run_all.assert_not_called()
 
     def test_cli_failure_exit(self):
         with patch.object(core, "push_repo_checked", return_value={"success": False, "message": "failed"}):
