@@ -1336,3 +1336,22 @@ def disable_tray_autostart():
     cfg = load_config()
     cfg["trayEnabled"] = False
     save_config(cfg)
+
+
+def force_utf8_stdio():
+    """Saida em UTF-8 mesmo quando stdout e' um pipe.
+
+    Com stdout redirecionado, o Python usa o code page do Windows (cp1252) e estoura ao
+    escrever emoji de mensagem de commit ("'charmap' codec can't encode"). No binario do
+    PyInstaller o PYTHONIOENCODING e o PYTHONUTF8 de quem chama sao ignorados, entao a
+    troca tem que ser feita aqui. No binario de janela os streams podem ser None.
+    """
+    import sys
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass

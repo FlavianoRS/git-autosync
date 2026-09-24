@@ -42,6 +42,7 @@ def tratar_argumentos(argv):
 
 
 def main(argv=None):
+    core.force_utf8_stdio()
     codigo = tratar_argumentos(list(sys.argv[1:] if argv is None else argv))
     if codigo is not None:
         return codigo

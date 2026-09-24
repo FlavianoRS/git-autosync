@@ -498,7 +498,11 @@ def launch_detached(target, extra_args):
     if target.suffix.lower() == ".py":
         subprocess.Popen([sys.executable, str(target), *extra_args])
     else:
-        subprocess.Popen([str(target), *extra_args])
+        # Sem o reset, o exe novo herda as variaveis _PYI_* deste processo congelado, se
+        # toma pelo subprocesso interno do onefile e aborta com "Security validation
+        # failure: failed to obtain executable path for parent process".
+        env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+        subprocess.Popen([str(target), *extra_args], env=env)
 
 
 # ---------------- GUI ----------------
@@ -735,6 +739,7 @@ def build_parser():
 
 
 def main():
+    core.force_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
 
