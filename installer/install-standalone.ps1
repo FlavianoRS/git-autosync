@@ -14,7 +14,7 @@
          proprio `git-autosync set-schedule`, que ja' e' idempotente, deduplica
          `GitAutoSyncPy_\d+` e sabe fazer rollback (ver python/scheduler.py). Criar a
          tarefa por fora e' o que produzia uma tarefa que a interface nao gerencia.
-      2. Instala as skills e, opcionalmente, o PATH — o `.bat` nao fazia nenhum dos dois.
+      2. Instala as skills e, opcionalmente, o PATH - o `.bat` nao fazia nenhum dos dois.
       3. Escreve `bin\VERSION`. Com ele, o hub e o instalador descobrem a versao
          instalada LENDO UM ARQUIVO, sem executar binario nenhum do autosync.
 
@@ -83,7 +83,7 @@ $ExeSync = Join-Path $PastaBin 'git-autosync-sync.exe'
 $ArquivoVersao = Join-Path $PastaBin 'VERSION'
 $TrayStartup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\GitAutoSyncTray.bat'
 
-# `GetFolderPath('Desktop')` devolve string VAZIA em processo nao interativo — que e'
+# `GetFolderPath('Desktop')` devolve string VAZIA em processo nao interativo - que e'
 # exatamente como o instalador chama este script. Medido no PowerShell 7 sem perfil.
 # O caminho por baixo do perfil cobre o caso; a API continua na frente porque ela e' a
 # unica que acerta quando a area de trabalho e' redirecionada (OneDrive, pasta de rede).
@@ -127,7 +127,7 @@ function Copiar-SeDiferente {
 <#
 Atalho e' cosmetico: falhar nele NAO pode derrubar a instalacao. Antes de existir este
 try/catch, uma area de trabalho ausente ou redirecionada abortava o script DEPOIS de
-copiar os binarios e ANTES das skills — a instalacao ficava pela metade por causa de um
+copiar os binarios e ANTES das skills - a instalacao ficava pela metade por causa de um
 `.lnk`. A pasta e' criada quando falta, que e' a causa mais comum.
 #>
 function Criar-Atalho {
@@ -210,7 +210,7 @@ if (-not $Source) { $Source = Join-Path $RaizRepo 'python\dist' }
 
 <# A versao e a skill sao procuradas AO LADO DOS BINARIOS antes do layout do
    repositorio. Quando o instalador do Sankhya Hub chama este script, o que existe e' a
-   pasta de recursos do pacote (binarios + VERSION + SKILL.md juntos) — nao ha repo
+   pasta de recursos do pacote (binarios + VERSION + SKILL.md juntos) - nao ha repo
    nenhum por perto. Rodando do checkout, nada muda: o `-Source` padrao e' `python\dist`,
    que nao tem VERSION, e a busca cai no arquivo do repositorio. #>
 if (-not $Version) {
@@ -228,7 +228,7 @@ $origemSync = Join-Path $Source 'git-autosync-sync.exe'
 
 foreach ($arquivo in @($origemGui, $origemSync)) {
     if (-not (Test-Path -LiteralPath $arquivo)) {
-        Falhar "nao encontrei $arquivo — gere os executaveis com python\build_windows.ps1 antes de instalar"
+        Falhar "nao encontrei $arquivo - gere os executaveis com python\build_windows.ps1 antes de instalar"
     }
 }
 
@@ -238,7 +238,7 @@ if ($TaskTime -and ($TaskTime -split ',' | Where-Object { $_.Trim() -notmatch $F
 
 # Pre-requisito real e unico: o autosync executa `git` de verdade.
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Falhar 'git nao encontrado no PATH — instale o Git antes de instalar o Git AutoSync'
+    Falhar 'git nao encontrado no PATH - instale o Git antes de instalar o Git AutoSync'
 }
 
 Escrever "=== Git AutoSync $Version (standalone, sem Python) ==="
@@ -248,7 +248,7 @@ Copiar-SeDiferente -De $origemGui -Para $ExeGui
 Copiar-SeDiferente -De $origemSync -Para $ExeSync
 
 # Lido pelo hub e pelo proximo instalador para decidir instalar/atualizar/nao mexer, sem
-# executar binario nenhum — diagnostico nao pode ter efeito colateral.
+# executar binario nenhum - diagnostico nao pode ter efeito colateral.
 Set-Content -LiteralPath $ArquivoVersao -Value $Version -Encoding ASCII -NoNewline
 Escrever "  + VERSION ($Version)"
 
@@ -284,7 +284,7 @@ if ($Skills) {
         Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
     if (-not $fonteSkill) { Falhar "nao encontrei o SKILL.md (procurei em $Source e em $RaizRepo\skill)" }
 
-    # A versao no cabecalho da skill acompanha a do produto — mesma substituicao que o
+    # A versao no cabecalho da skill acompanha a do produto - mesma substituicao que o
     # `installer/install.py` faz.
     $texto = (Get-Content -LiteralPath $fonteSkill -Raw) -replace '(?m)^version:\s*.*$', "version: $Version"
 
@@ -316,6 +316,6 @@ if ($AddToPath) {
 Escrever ''
 Escrever "Instalado em $PastaBin"
 if (-not $TaskTime) {
-    Escrever 'Sem tarefa agendada nesta instalacao — use a aba Agendamento da interface quando quiser uma.'
+    Escrever 'Sem tarefa agendada nesta instalacao - use a aba Agendamento da interface quando quiser uma.'
 }
 exit 0
