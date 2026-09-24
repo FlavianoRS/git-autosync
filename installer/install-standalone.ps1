@@ -166,15 +166,21 @@ function Remover-SeExistir {
 
 # O git-autosync.exe e' binario de janela (PyInstaller sem console). Chamado com `&`, o
 # PowerShell NAO espera por ele e nao define $LASTEXITCODE: sob StrictMode a leitura
-# derruba o script, e o comando nem termina antes do seguinte. Start-Process -Wait espera
-# o processo e devolve o codigo de saida de verdade.
+# derruba o script, e o comando nem termina antes do seguinte. Start-Process + WaitForExit
+# espera o processo e devolve o codigo de saida de verdade.
 function Invocar-Exe {
     param([string] $Exe, [string[]] $Argumentos)
     $saidaPadrao = [System.IO.Path]::GetTempFileName()
     $saidaErro = [System.IO.Path]::GetTempFileName()
     try {
-        $processo = Start-Process -FilePath $Exe -ArgumentList $Argumentos -Wait -PassThru `
+        # WaitForExit e nao -Wait: o -Wait do PowerShell 5.1 espera a ARVORE de processos, e
+        # o enable-tray deixa a bandeja aberta como filha - o script nunca voltaria.
+        $processo = Start-Process -FilePath $Exe -ArgumentList $Argumentos -PassThru `
             -WindowStyle Hidden -RedirectStandardOutput $saidaPadrao -RedirectStandardError $saidaErro
+        # Ler o Handle antes de o processo sair e' o que preserva o ExitCode: sem isso o
+        # PowerShell devolve ExitCode vazio para processo iniciado com -PassThru.
+        $null = $processo.Handle
+        $processo.WaitForExit()
         $texto = ((Get-Content -LiteralPath $saidaPadrao, $saidaErro -Raw -ErrorAction SilentlyContinue) -join "`n").Trim()
         return [pscustomobject]@{ Codigo = $processo.ExitCode; Saida = $texto }
     } finally {
