@@ -164,6 +164,24 @@ function Remover-SeExistir {
     }
 }
 
+# O git-autosync.exe e' binario de janela (PyInstaller sem console). Chamado com `&`, o
+# PowerShell NAO espera por ele e nao define $LASTEXITCODE: sob StrictMode a leitura
+# derruba o script, e o comando nem termina antes do seguinte. Start-Process -Wait espera
+# o processo e devolve o codigo de saida de verdade.
+function Invocar-Exe {
+    param([string] $Exe, [string[]] $Argumentos)
+    $saidaPadrao = [System.IO.Path]::GetTempFileName()
+    $saidaErro = [System.IO.Path]::GetTempFileName()
+    try {
+        $processo = Start-Process -FilePath $Exe -ArgumentList $Argumentos -Wait -PassThru `
+            -WindowStyle Hidden -RedirectStandardOutput $saidaPadrao -RedirectStandardError $saidaErro
+        $texto = ((Get-Content -LiteralPath $saidaPadrao, $saidaErro -Raw -ErrorAction SilentlyContinue) -join "`n").Trim()
+        return [pscustomobject]@{ Codigo = $processo.ExitCode; Saida = $texto }
+    } finally {
+        Remove-Item -LiteralPath $saidaPadrao, $saidaErro -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ---------------------------------------------------------------- desinstalacao -----
 
 if ($Uninstall) {
@@ -175,8 +193,7 @@ if ($Uninstall) {
     # ja' nao estiver la' ou recusar.
     $removeuPeloBinario = $false
     if (Test-Path -LiteralPath $ExeGui) {
-        & $ExeGui uninstall 2>&1 | Out-Null
-        $removeuPeloBinario = $LASTEXITCODE -eq 0
+        $removeuPeloBinario = (Invocar-Exe $ExeGui @('uninstall')).Codigo -eq 0
     }
     if (-not $removeuPeloBinario) {
         Escrever '  ! removendo tarefa agendada pelo schtasks (o binario nao respondeu)'
@@ -257,8 +274,8 @@ if ($TaskTime) {
     # `git-autosync-sync.exe` ao lado, deduplica tarefas antigas e restaura a anterior se
     # a nova falhar. Um `schtasks /Create` aqui criaria uma segunda tarefa que a
     # interface nao enxerga como sua.
-    $saida = & $ExeGui set-schedule $TaskTime 2>&1
-    if ($LASTEXITCODE -ne 0) { Falhar "falha ao agendar ($TaskTime): $saida" }
+    $r = Invocar-Exe $ExeGui @('set-schedule', $TaskTime)
+    if ($r.Codigo -ne 0) { Falhar "falha ao agendar ($TaskTime): $($r.Saida)" }
     Escrever "  + tarefa agendada ($TaskTime)"
 }
 
@@ -266,8 +283,8 @@ if ($EnableTray) {
     # Delegado pelo mesmo motivo do agendamento: `enable-tray` escreve o `.bat` da pasta
     # Startup E grava `trayEnabled` no `config.json`. Escrever so' o `.bat` deixaria a
     # interface mostrando a bandeja como desligada enquanto ela sobe todo login.
-    $saida = & $ExeGui enable-tray 2>&1
-    if ($LASTEXITCODE -ne 0) { Falhar "falha ao habilitar a bandeja: $saida" }
+    $r = Invocar-Exe $ExeGui @('enable-tray')
+    if ($r.Codigo -ne 0) { Falhar "falha ao habilitar a bandeja: $($r.Saida)" }
     Escrever '  + bandeja iniciando com o login'
 }
 
