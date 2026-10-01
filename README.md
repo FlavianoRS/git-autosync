@@ -319,3 +319,7 @@ legacy/                      versao original em PowerShell (Windows-only, refere
 ```
 
 Ver `CHANGELOG.md` para o histórico de versões.
+
+## Licença
+
+MIT — uso livre, inclusive comercial, sem garantia. Ver [LICENSE](LICENSE).
