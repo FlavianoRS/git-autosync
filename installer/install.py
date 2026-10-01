@@ -13,6 +13,9 @@ import re
 import shutil
 import subprocess
 import sys
+import hashlib
+import tempfile
+import argparse
 from pathlib import Path
 
 IS_WINDOWS = platform.system() == "Windows"
@@ -22,14 +25,52 @@ PYTHON_DIR = REPO_ROOT / "python"
 SKILL_SOURCE = REPO_ROOT / "skill" / "SKILL.md"
 VERSION = (PYTHON_DIR / "VERSION").read_text(encoding="utf-8").strip()
 
-STATE_DIR = Path.home() / ".git-autosync"
+STATE_DIR = Path(os.environ.get("GIT_AUTOSYNC_HOME", str(Path.home() / ".git-autosync")))
 VENV_DIR = STATE_DIR / "venv"
 BIN_DIR = STATE_DIR / "bin"
 
 SKILL_FILES = [
     "app.py", "autosync_core.py", "gui.py", "gui_launcher.pyw", "run_sync.py",
+    "runtime_safety.py", "scheduler.py", "credentials.py",
     "requirements.txt", "VERSION", "build_windows.ps1", "build_linux.sh",
+    "git-autosync.spec", "git-autosync-sync.spec",
 ]
+
+
+def _release_digest(source):
+    files = [p for p in source.rglob("*") if p.is_file()
+             and not any(part in ("build", "dist", "__pycache__") for part in p.relative_to(source).parts)]
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(path.relative_to(source).as_posix().encode())
+        digest.update(path.read_bytes())
+    return files, digest.hexdigest()
+
+
+def prepare_release(source=None):
+    """Install an immutable content-addressed copy, independent of the checkout."""
+    source = Path(source or PYTHON_DIR)
+    files, digest = _release_digest(source)
+    version = (source / "VERSION").read_text(encoding="utf-8").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", version):
+        raise ValueError("VERSION invalida.")
+    releases = STATE_DIR / "releases"
+    releases.mkdir(parents=True, exist_ok=True)
+    target = releases / f"{version}-{digest[:12]}"
+    if target.exists():
+        _, installed_digest = _release_digest(target)
+        if installed_digest != digest:
+            raise RuntimeError(f"Release existente foi alterada: {target}")
+        return target
+    with tempfile.TemporaryDirectory(prefix="install-", dir=releases) as staging:
+        payload = Path(staging) / "payload"
+        payload.mkdir()
+        for path in files:
+            dest = payload / path.relative_to(source)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, dest)
+        payload.rename(target)
+    return target
 
 
 def ask(prompt, default=None):
@@ -192,7 +233,7 @@ def install_gui():
     launcher = PYTHON_DIR / "gui_launcher.pyw"
 
     if confirm("Habilitar tarefa agendada + tray no login agora?", default_yes=True):
-        subprocess.run([str(py), str(PYTHON_DIR / "app.py"), "enable-tray"], check=False)
+        subprocess.run([str(py), str(PYTHON_DIR / "app.py"), "enable-tray"], check=True)
 
     if confirm("Criar atalho na area de trabalho?", default_yes=True):
         create_shortcut(launcher)
@@ -206,7 +247,7 @@ def install_cli(components):
     default_yes = not components["gui"]
     if confirm("Instalar a tarefa agendada agora (so commit+push automatico, sem GUI/tray)?",
                default_yes=default_yes):
-        subprocess.run([str(py), str(PYTHON_DIR / "app.py"), "install"], check=False)
+        subprocess.run([str(py), str(PYTHON_DIR / "app.py"), "install"], check=True)
 
     create_cli_shim(py)
     ensure_on_path(BIN_DIR)
@@ -232,17 +273,43 @@ def install_skill():
             src = PYTHON_DIR / name
             if src.exists():
                 shutil.copy2(src, scripts_dir / name)
+        shutil.copytree(PYTHON_DIR / "assets", scripts_dir / "assets", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
         (target / "SKILL.md").write_text(skill_md, encoding="utf-8")
         print(f"  Skill instalada em: {target}")
 
 
 def main():
+    global PYTHON_DIR, VERSION
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--release", help="reinstala uma release ja presente em ~/.git-autosync/releases")
+    args = parser.parse_args()
+    if args.release:
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", args.release):
+            parser.error("Identificador de release invalido.")
+        releases = (STATE_DIR / "releases").resolve()
+        PYTHON_DIR = (releases / args.release).resolve(strict=True)
+        if PYTHON_DIR.parent != releases or not PYTHON_DIR.is_dir():
+            parser.error("Release fora do diretorio permitido.")
+        version_file = PYTHON_DIR / "VERSION"
+        if not version_file.is_file():
+            parser.error("Release incompleta: VERSION ausente.")
+        VERSION = version_file.read_text(encoding="utf-8").strip()
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", VERSION):
+            parser.error("VERSION invalida na release.")
+        _, digest = _release_digest(PYTHON_DIR)
+        if args.release != f"{VERSION}-{digest[:12]}":
+            parser.error("Release alterada ou identificador incompativel com o conteudo.")
     print(f"=== Instalador Git AutoSync v{VERSION} ===\n")
     check_prereqs()
     components = ask_components()
     if not any(components.values()):
         print("Nada selecionado, saindo.")
         return
+
+    if not args.release:
+        PYTHON_DIR = prepare_release()
+    print(f"Release instalada: {PYTHON_DIR}")
 
     if components["gui"]:
         install_gui()

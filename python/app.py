@@ -64,7 +64,7 @@ def cmd_list(args):
 
 
 def cmd_add(args):
-    p = Path(args.path)
+    p = Path(args.path).resolve()
     if not p.exists():
         print(f"Caminho nao existe: {args.path}", file=sys.stderr)
         sys.exit(1)
@@ -78,7 +78,7 @@ def cmd_add(args):
 
 
 def cmd_remove(args):
-    target_path = str(Path(args.path))
+    target_path = str(Path(args.path).resolve())
     cfg = core.load_config()
     before = len(cfg["targets"])
     cfg["targets"] = [t for t in cfg["targets"] if t["path"] != target_path]
@@ -112,8 +112,6 @@ def cmd_include(args):
 def cmd_set_schedule(args):
     times = [t.strip() for t in args.times.split(",") if t.strip()]
     cfg = core.load_config()
-    cfg["schedules"] = times
-    core.save_config(cfg)
     sync_target, _ = self_paths()
     core.install_schedule(sync_target, schedules=times, task_name=cfg["taskName"])
     core.pin_schedule_agent_if_created_by_skill()
@@ -125,6 +123,57 @@ def cmd_set_agent(args):
     cfg["aiAgent"] = args.agent
     core.save_config(cfg)
     print(f"Agente de IA (preferencia geral): {args.agent}")
+
+
+def cmd_set_ai(args):
+    cfg = core.load_config()
+    cfg["aiEnabled"] = args.mode == "on"
+    core.save_config(cfg)
+    print("Envio de diff a IA " + ("habilitado." if cfg["aiEnabled"] else "desabilitado."))
+
+
+def cmd_set_policy(args):
+    cfg = core.load_config()
+    path = _resolve_repo_arg(args.repo)
+    policies = cfg.setdefault("repoPolicies", {})
+    policy = policies.setdefault(path, {})
+    for attr, field in (("include", "include"), ("exclude", "exclude"), ("branch", "allowedBranches")):
+        value = getattr(args, attr)
+        if value is not None:
+            policy[field] = value
+    if args.max_file_bytes is not None:
+        if args.max_file_bytes < 1:
+            raise ValueError("max-file-bytes deve ser positivo.")
+        policy["maxFileBytes"] = args.max_file_bytes
+    if args.ai is not None:
+        policy["aiEnabled"] = args.ai == "on"
+    core.save_config(cfg)
+    print(json.dumps(policy, indent=2, ensure_ascii=False))
+
+
+def cmd_doctor(args):
+    import shutil
+    checks = {"git": bool(shutil.which("git")), "config": True, "repos": {}}
+    cfg = core.load_config()
+    for path in core.resolve_targets(cfg.get("targets", [])):
+        try:
+            core._preflight(path)
+            remote, branch = core._push_target(path)
+            reachable = core.check_remote_reachable(path) if args.network else None
+            checks["repos"][path] = {"ok": reachable is not False, "remote": remote,
+                                     "branch": branch, "reachable": reachable}
+        except Exception as exc:
+            checks["repos"][path] = {"ok": False, "error": core.redact(str(exc))}
+    if core.IS_WINDOWS:
+        import scheduler
+        checks["scheduledTasks"] = scheduler._task_names(cfg["taskName"])
+    else:
+        import scheduler
+        checks["cronInstalled"] = any(line.rstrip().endswith(core.CRON_MARKER)
+                                       for line in scheduler._read_cron().splitlines())
+    print(json.dumps(checks, indent=2, ensure_ascii=False))
+    if not checks["git"] or any(not r["ok"] for r in checks["repos"].values()):
+        raise SystemExit(1)
 
 
 def _make_cli_push_decider(cancel_label):
@@ -152,6 +201,20 @@ _cli_sync_decider = _make_cli_push_decider("apenas commit")
 _cli_push_only_decider = _make_cli_push_decider("cancelar o push")
 
 
+def _cli_autofix_confirm(repo_path, kind, explain, cmd):
+    """Chamado quando um `git push` falha por um motivo com correcao
+    conhecida (ver core.diagnose_push_failure) - pergunta no terminal antes
+    de rodar o comando sugerido. Sem terminal interativo, so avisa e nao
+    corrige (mesmo padrao do push_decider acima)."""
+    if not sys.stdin.isatty():
+        print(f"[aviso] {repo_path}: push falhou ({explain}). sugestao: {cmd}")
+        return False
+    choice = input(f"[aviso] {repo_path}: push falhou ({explain}).\n"
+                    f"  comando sugerido: {cmd}\n"
+                    f"  Executar agora? [s/N]: ").strip().lower()
+    return choice == "s"
+
+
 def _resolve_repo_arg(repo_arg):
     """--repo <caminho>, ou o diretorio atual se omitido."""
     return str(Path(repo_arg).resolve()) if repo_arg else str(Path.cwd())
@@ -161,6 +224,8 @@ def _print_batch_result(status):
     for path, r in status["repos"].items():
         tag = "[OK]" if r.get("success") else "[ERRO]"
         print(f"{tag} {path}: {r.get('message', '')}")
+    if any(not r.get("success") for r in status["repos"].values()):
+        raise SystemExit(1)
 
 
 def cmd_preview(args):
@@ -174,7 +239,7 @@ def cmd_preview(args):
     core.unstage(path)
     if staged["error"]:
         print(f"[ERRO] {path}: {staged['error']}")
-        return
+        raise SystemExit(1)
     if not staged["hadChanges"]:
         print(f"[OK] {path}: sem alteracoes pendentes")
         return
@@ -263,7 +328,7 @@ def cmd_commit(args):
         staged = core.stage_and_generate_message(path, agent=args.agent)
         if staged["error"]:
             print(f"[ERRO] {path}: {staged['error']}")
-            return
+            raise SystemExit(1)
         if not staged["hadChanges"]:
             print(f"[OK] {path}: sem alteracoes, nada a fazer")
             return
@@ -277,24 +342,29 @@ def cmd_commit(args):
         r = core.commit_repo(path, message=args.message, agent=args.agent)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
+    if not r["success"]:
+        raise SystemExit(1)
 
 
 def cmd_push(args):
     if args.all:
         print("Dando push em todos os alvos configurados...")
-        _print_batch_result(core.push_all(push_decider=_cli_push_only_decider))
+        _print_batch_result(core.push_all(push_decider=_cli_push_only_decider, autofix_confirm=_cli_autofix_confirm))
         return
     path = _resolve_repo_arg(args.repo)
-    r = core.push_repo_checked(path, push_decider=_cli_push_only_decider)
+    r = core.push_repo_checked(path, push_decider=_cli_push_only_decider, autofix_confirm=_cli_autofix_confirm)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
+    if not r["success"]:
+        raise SystemExit(1)
 
 
 def cmd_sync(args):
     _check_review_args(args)
     if args.all:
         print("Rodando sync (commit + push) em todos os alvos configurados...")
-        _print_batch_result(core.run_all(push_decider=_cli_sync_decider, agent=args.agent))
+        _print_batch_result(core.run_all(push_decider=_cli_sync_decider, agent=args.agent,
+                                          autofix_confirm=_cli_autofix_confirm))
         return
 
     path = _resolve_repo_arg(args.repo)
@@ -302,20 +372,51 @@ def cmd_sync(args):
         staged = core.stage_and_generate_message(path, agent=args.agent)
         if staged["error"]:
             print(f"[ERRO] {path}: {staged['error']}")
-            return
+            raise SystemExit(1)
         if not staged["hadChanges"]:
-            print(f"[OK] {path}: sem alteracoes, nada a fazer")
+            r = core.push_repo_checked(path, push_decider=_cli_push_only_decider,
+                                       autofix_confirm=_cli_autofix_confirm)
+            print(f"{path}: {r['message']}")
+            if not r["success"]:
+                raise SystemExit(1)
             return
         message = _review_message_prompt(path, staged["message"])
         if message is None:
             core.unstage(path)
             print(f"Cancelado, nada commitado/enviado em {path}.")
             return
-        r = core.finalize_sync(path, message, push_decider=_cli_sync_decider)
+        r = core.finalize_sync(path, message, push_decider=_cli_sync_decider, autofix_confirm=_cli_autofix_confirm)
     else:
-        r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message, agent=args.agent)
+        r = core.sync_repo(path, push_decider=_cli_sync_decider, message=args.message, agent=args.agent,
+                            autofix_confirm=_cli_autofix_confirm)
     tag = "[OK]" if r["success"] else "[ERRO]"
     print(f"{tag} {path}: {r['message']}")
+    if not r["success"]:
+        raise SystemExit(1)
+
+
+def cmd_mr(args):
+    path = _resolve_repo_arg(args.repo)
+    r = core.create_merge_request(path, target_branch=args.target, title=args.title, source_branch=args.source)
+    tag = "[OK]" if r["success"] else "[ERRO]"
+    print(f"{tag} {path}: {r['message']}")
+    if not r["success"]:
+        raise SystemExit(1)
+
+
+def cmd_set_gitlab_token(args):
+    if args.clear:
+        core.clear_gitlab_token()
+        print("Token do GitLab removido.")
+        return
+    import getpass
+    token = getpass.getpass("Personal Access Token do GitLab (escopo 'api', input oculto): ").strip()
+    if not token:
+        print("Token vazio, nada salvo.", file=sys.stderr)
+        sys.exit(1)
+    host = args.host or input("Host GitLab autorizado (ex.: gitlab.empresa.com): ").strip()
+    core.set_gitlab_token(token, host)
+    print("Token protegido pelo cofre do sistema e vinculado ao host informado.")
 
 
 SINCE_PRESETS = {"7d": 7, "30d": 30, "90d": 90}
@@ -397,7 +498,11 @@ def launch_detached(target, extra_args):
     if target.suffix.lower() == ".py":
         subprocess.Popen([sys.executable, str(target), *extra_args])
     else:
-        subprocess.Popen([str(target), *extra_args])
+        # Sem o reset, o exe novo herda as variaveis _PYI_* deste processo congelado, se
+        # toma pelo subprocesso interno do onefile e aborta com "Security validation
+        # failure: failed to obtain executable path for parent process".
+        env = {**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+        subprocess.Popen([str(target), *extra_args], env=env)
 
 
 # ---------------- GUI ----------------
@@ -541,7 +646,7 @@ def build_parser():
     g = p.add_mutually_exclusive_group()
     g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
     g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
-    p.add_argument("-m", "--message", help="mensagem customizada (sem isso, gera automaticamente via IA); "
+    p.add_argument("-m", "--message", help="mensagem customizada (sem isso, usa fallback ou IA autorizada); "
                                             "nao pode ser usado com --all/--review")
     p.add_argument("--review", action="store_true",
                    help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar "
@@ -560,7 +665,7 @@ def build_parser():
     g = p.add_mutually_exclusive_group()
     g.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
     g.add_argument("--all", action="store_true", help="todos os alvos configurados, em vez do repo atual")
-    p.add_argument("-m", "--message", help="mensagem customizada (sem isso, gera automaticamente via IA); "
+    p.add_argument("-m", "--message", help="mensagem customizada (sem isso, usa fallback ou IA autorizada); "
                                             "nao pode ser usado com --all/--review")
     p.add_argument("--review", action="store_true",
                    help="mostra a mensagem gerada e deixa usar/editar/cancelar antes de commitar e enviar "
@@ -572,6 +677,35 @@ def build_parser():
     p = sub.add_parser("set-agent", help="define o agente de IA preferido pra gerar mensagem de commit")
     p.add_argument("agent", choices=["auto", "claude", "codex", "opencode"])
     p.set_defaults(func=cmd_set_agent)
+
+    p = sub.add_parser("set-ai", help="autoriza ou desativa envio de diffs a IA")
+    p.add_argument("mode", choices=["on", "off"])
+    p.set_defaults(func=cmd_set_ai)
+
+    p = sub.add_parser("set-policy", help="politica por repositorio; arquivos fora dela bloqueiam o commit inteiro")
+    p.add_argument("--repo", required=True)
+    p.add_argument("--include", action="append")
+    p.add_argument("--exclude", action="append")
+    p.add_argument("--branch", action="append")
+    p.add_argument("--max-file-bytes", type=int)
+    p.add_argument("--ai", choices=["on", "off"])
+    p.set_defaults(func=cmd_set_policy)
+
+    p = sub.add_parser("doctor", help="verifica configuracao, repositorios e agendamento")
+    p.add_argument("--network", action="store_true", help="tambem verifica acesso aos remotos")
+    p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("mr", help="cria (ou reaproveita) uma Merge Request pra branch protegida via API do GitLab")
+    p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
+    p.add_argument("--target", help="branch de destino (default: config mrTargetBranch, senao 'main')")
+    p.add_argument("--source", help="branch de origem (default: branch atual)")
+    p.add_argument("--title", help="titulo da MR (default: '<origem> -> <destino>')")
+    p.set_defaults(func=cmd_mr)
+
+    p = sub.add_parser("set-gitlab-token", help="salva (input oculto) ou remove o Personal Access Token do GitLab")
+    p.add_argument("--host", help="host GitLab autorizado, sem protocolo ou caminho")
+    p.add_argument("--clear", action="store_true", help="remove o token salvo em vez de pedir um novo")
+    p.set_defaults(func=cmd_set_gitlab_token)
 
     p = sub.add_parser("preview", help="gera a mensagem do commit e mostra, sem commitar nada (repo atual por padrao)")
     p.add_argument("--repo", help="caminho do repo (default: diretorio atual)")
@@ -605,6 +739,7 @@ def build_parser():
 
 
 def main():
+    core.force_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
 
@@ -615,7 +750,11 @@ def main():
         run_gui()
         return
     if getattr(args, "command", None):
-        args.func(args)
+        try:
+            args.func(args)
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(f"[ERRO] {core.redact(str(exc))}", file=sys.stderr)
+            raise SystemExit(1)
         return
 
     # no args at all -> default to GUI for a friendlier double-click experience

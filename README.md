@@ -1,8 +1,8 @@
 # Git AutoSync
 
 Ferramenta que varre repositórios git configurados e, quando encontra alterações,
-gera uma mensagem de commit (via **Claude, Codex ou OpenCode** — o que estiver
-instalado/preferido, com fallback automático), faz commit e dá `push`. A rodada
+gera uma mensagem de commit localmente ou, com autorização explícita, via
+**Claude, Codex ou OpenCode**, faz commit e dá `push`. A rodada
 **agendada** (Task Scheduler/cron) faz commit + push sozinha, sem intervenção. As
 ações **manuais** (GUI ou CLI) vêm separadas: primeiro commita (pra você revisar a
 mensagem gerada), depois você decide se dá push.
@@ -23,6 +23,12 @@ Esses scripts detectam Python automaticamente e chamam o instalador
 standalone (usa os `.exe`/binários já empacotados em `python/dist/`, sem
 precisar de Python na máquina de destino — ver `COMO_INSTALAR.md`) ou
 explicam como resolver.
+
+O instalador Python copia primeiro uma release versionada e identificada pelo
+conteúdo para `~/.git-autosync/releases/`. CLI, tray, atalhos e tarefa agendada
+apontam para essa cópia, não para o checkout que pode ser movido ou alterado.
+Uma release já existente só é reutilizada se sua integridade conferir. Para
+reinstalar uma cópia existente: `python installer/install.py --release <id>`.
 
 Rodando o instalador Python direto:
 
@@ -78,9 +84,9 @@ Sidebar com:
   individuais (cada um agindo só naquele repositório), e uma seta pra
   expandir e ver as últimas mensagens de commit geradas. **Commitar** e
   **Sincronizar** abrem um diálogo que já mostra a mensagem gerada
-  automaticamente (via IA, com fallback se não tiver) — revise, edite se
-  quiser, e só então confirme; cancelar desfaz o que já tinha sido staged,
-  sem commitar nada. Cards que vieram de uma pasta `root` mostram "via
+  automaticamente (fallback local ou IA autorizada) — revise, edite se
+  quiser, e só então confirme. A prévia usa índice Git privado: cancelar não
+  altera o stage que já existia. Cards que vieram de uma pasta `root` mostram "via
   pasta: `<caminho>`" e, no lugar
   de Ativar/Desativar/Remover, têm um botão **"Ignorar"** — tira só aquele
   repositório da varredura do root (equivalente ao `exclude` do CLI), sem
@@ -107,12 +113,16 @@ No fim da sidebar tem um seletor **Tema: Sistema / Claro / Escuro** — troca a
 aparência na hora, sem reiniciar, e salva a escolha (`theme` no
 `config.json`).
 
-Na aba **Agendamento** também tem o seletor de **Agente de IA** (Automático /
-Claude / Codex / OpenCode) — ver seção abaixo.
+Na aba **Agendamento** também há autorização de envio do diff e seletor de
+**Agente de IA** (Automático / Claude / Codex / OpenCode) — ver seção abaixo.
 
-## Qual IA gera a mensagem do commit
+## Mensagem de commit e IA
 
-Suporta **Claude**, **Codex** e **OpenCode** — detecta o que estiver instalado
+Envio de diff à IA vem **desabilitado por padrão**. Nesse modo, mensagens
+automáticas usam o fallback local `chore: auto-commit <data/hora>`. Ative
+explicitamente na GUI ou com `set-ai on`; `set-ai off` revoga a autorização.
+
+Quando autorizado, suporta **Claude**, **Codex** e **OpenCode** — detecta o que estiver instalado
 e usa (ordem padrão: Claude → Codex → OpenCode), ou force um deles em
 "Agente de IA" na aba Agendamento da GUI, `set-agent` no CLI, ou `--agent` só
 numa chamada. Os três são chamados com o diff já embutido no prompt (nunca
@@ -123,7 +133,12 @@ arquivo/shell pra responder:
 - **Codex**: `codex exec --sandbox read-only` — só leitura, sem escrita/execução.
 - **OpenCode**: usa um agente restrito (`git-autosync-safe`, sem
   write/edit/bash/webfetch) que o próprio git-autosync cria/mantém em
-  `~/.config/opencode/opencode.json` (sem tocar no resto do seu config).
+  `~/.config/opencode/opencode.json` (sem substituir configuração válida existente).
+
+Antes do envio, arquivos sensíveis conhecidos, possíveis chaves/tokens e
+arquivos acima do limite são bloqueados. Políticas por repositório podem limitar
+branches, inclusões, exclusões, tamanho de arquivo e autorização de IA. O diff
+enviado é limitado a 12.000 caracteres e não usa filtros externos do Git.
 
 **Quando o agendamento é criado através de uma skill** (Claude Code/Codex
 rodando `install`/`set-schedule` via chat), a rodada agendada fica fixada
@@ -159,6 +174,11 @@ python app.py uninstall                   # remove tarefa agendada e autostart d
 python app.py enable-tray                 # instala tarefa agendada + autostart da bandeja no login
 python app.py disable-tray
 python app.py set-agent codex             # preferencia geral de agente: auto | claude | codex | opencode
+python app.py set-ai on                    # autoriza envio de diff a IA; use off para revogar
+python app.py set-policy --repo <repo> --branch "feature/*" --exclude "secrets/*"
+python app.py set-policy --repo <repo> --max-file-bytes 1048576 --ai off
+python app.py doctor                       # valida Git, configuracao, repos e agendamento
+python app.py doctor --network             # inclui teste de acesso aos remotos
 python app.py --version
 ```
 
@@ -204,11 +224,17 @@ vários repositórios de uma vez), e são mutuamente exclusivos entre si.
 verdade (ex: pedindo pela skill do Claude Code/Codex, via chat), use
 `preview` pra ver a mensagem gerada e depois `commit -m "..."`/`sync -m "..."`
 com a versão final. Sem `-m`/`--review`, a mensagem é gerada automaticamente
-(via IA, com fallback se não tiver). `push`/`sync` verificam se o remoto
+(fallback local ou IA autorizada). `push`/`sync` verificam se o remoto
 está acessível antes de dar push (ou antes de
 commitar, no caso do `sync`) — se não estiver, perguntam `[T] tentar
 novamente` / `[C]` no terminal (cancelar o push, ou seguir só commitando,
 dependendo do comando).
+
+Commit criado sem push confirmado não é sucesso: fica como `pending_push`, o
+comando retorna código diferente de zero e a GUI/status mostram falha pendente.
+Uma rodada posterior tenta enviar commits locais mesmo quando não há novas
+alterações. Falhas conhecidas de upstream/non-fast-forward oferecem correção
+somente em fluxos interativos; execução agendada apenas registra a sugestão.
 
 Se instalou o componente CLI pelo `installer/install.py`, esses comandos ficam
 disponíveis como `git-autosync commit|push|sync` de qualquer lugar do terminal
@@ -222,6 +248,11 @@ Tudo fica em `~/.git-autosync/` (por usuário, não versionado):
 - `status.json` — resultado da última sincronização por repositório (incluindo
   `lastPush`)
 - `autosync.log` — histórico de execuções
+- `releases/` — cópias instaladas, versionadas e identificadas pelo conteúdo
+
+Escritas de configuração/status são atômicas e protegidas contra concorrência.
+Logs têm rotação e remoção de tokens reconhecíveis. Para testes/automação, use
+`GIT_AUTOSYNC_HOME` para isolar todo estado da aplicação.
 
 Histórico de commits (aba Histórico / comando `history`) não fica em nenhum
 arquivo próprio — é lido direto do `git log` de cada repositório configurado, já
@@ -230,13 +261,26 @@ que a mensagem exibida É a mensagem gerada (é o que foi commitado).
 `legacy/config.example.json` mostra o formato antigo (PowerShell) — sirva só de
 referência, não é importado automaticamente pela versão Python.
 
-## Credenciais do git
+## Credenciais
 
 A ferramenta sempre chama o `git` do sistema (`subprocess`, dentro da pasta do
 próprio repositório) — nunca guarda nem manuseia credencial própria. Ela reusa o
 que já estiver configurado na máquina de quem a executa: Git Credential Manager
 no Windows, agente SSH, token HTTPS em cache, `.netrc`, etc. Se `git push`
 funciona manual naquele repositório, funciona pelo autosync também.
+
+Para criar Merge Requests no GitLab, salve token vinculado ao host:
+
+```bash
+python app.py set-gitlab-token --host gitlab.empresa.com
+python app.py mr --repo <repo> --target main
+python app.py set-gitlab-token --clear
+```
+
+No Windows, token é protegido por DPAPI. No Linux, usa Secret Service via
+`secret-tool`. Alternativamente, defina juntas
+`GIT_AUTOSYNC_GITLAB_TOKEN` e `GIT_AUTOSYNC_GITLAB_HOST`; token só será usado
+para host exatamente autorizado. Token legado em texto puro é recusado.
 
 ## Empacotando como executável standalone
 
@@ -254,14 +298,14 @@ Gera em `python/dist/`:
 - `git-autosync` (ou `.exe`) — GUI + tray + CLI
 - `git-autosync-sync` (ou `.exe`) — usado pela tarefa agendada, roda silencioso e loga em arquivo
 
-## Aviso de segurança
+## Segurança operacional
 
-A rodada agendada (e os comandos `commit`/`sync`) fazem `git add -A` +
-`git commit` automaticamente, sem revisão humana, e enviam o diff (até 12000
-caracteres) pro `claude` CLI pra gerar a mensagem de commit. `sync`/`push` e o
-botão "Push tudo"/tarefa agendada também dão `push` de verdade. Não aponte para
-repositórios onde isso seja um problema (ex: diffs com segredos/credenciais que
-não deveriam sair da máquina, ou onde publicar sem revisão não é aceitável).
+A rodada agendada faz commit e push sem revisão humana. Cada repositório possui
+lock entre processos; operações Git em andamento, conflitos, HEAD destacado,
+políticas violadas e arquivos sensíveis bloqueiam o commit inteiro. O índice
+real do usuário é preservado em cancelamentos e falhas. Ainda assim, configure
+políticas adequadas e não monitore repositórios onde publicação automática seja
+inaceitável.
 
 ## Estrutura do projeto
 

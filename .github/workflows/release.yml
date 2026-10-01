@@ -1,0 +1,67 @@
+name: Release
+
+# Dispara ao empurrar uma tag `vX.Y.Z`. Compila os dois executaveis standalone
+# do Windows (mesmos passos de python/build_windows.ps1) e publica uma Release
+# no GitHub com eles anexados, usando o trecho correspondente do CHANGELOG.md
+# como corpo da release. O zip do codigo-fonte ja vem anexado automaticamente
+# pelo GitHub em toda Release/tag.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instala dependencias
+        working-directory: python
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Compila os executaveis standalone
+        working-directory: python
+        run: |
+          pyinstaller --noconfirm git-autosync.spec
+          pyinstaller --noconfirm git-autosync-sync.spec
+
+      - name: Extrai a secao da versao no CHANGELOG
+        id: changelog
+        shell: bash
+        run: |
+          versao="${GITHUB_REF_NAME#v}"
+          awk -v ver="$versao" '
+            BEGIN { found = 0 }
+            /^## / {
+              if (found) exit
+              if ($0 == "## " ver) { found = 1; next }
+              next
+            }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "Sem secao '## $versao' no CHANGELOG.md; usando notas geradas pelo GitHub." > release-notes.md
+          fi
+
+          echo "Notas extraidas:"
+          cat release-notes.md
+
+      - name: Cria a Release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: |
+            python/dist/git-autosync.exe
+            python/dist/git-autosync-sync.exe

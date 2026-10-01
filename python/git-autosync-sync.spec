@@ -5,7 +5,9 @@ a = Analysis(
     ['run_sync.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # VERSION junto: sem ele o `--version` deste binario responde "desconhecida", e o
+    # instalador e o diagnostico do hub nao conseguem comparar versao instalada.
+    datas=[('VERSION', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

@@ -4,66 +4,59 @@ rem (git-autosync.exe / git-autosync-sync.exe), sem exigir Python nesta
 rem maquina. Alguem do time precisa ter gerado esses .exe antes, com
 rem python\build_windows.ps1 (isso sim exige Python, mas so na maquina
 rem de quem gera - quem so instala nao precisa de nada).
+rem
+rem Este arquivo hoje so faz as perguntas: quem instala e o
+rem install-standalone.ps1, o mesmo script que o instalador do Sankhya Hub
+rem chama em modo silencioso. Ter dois instaladores independentes saia caro:
+rem a tarefa agendada era criada aqui com schtasks direto, com um nome que a
+rem interface do autosync nao reconhecia como dela - e a reinstalacao
+rem deixava duas tarefas rodando o mesmo sync.
 setlocal enabledelayedexpansion
-cd /d "%~dp0.."
+cd /d "%~dp0"
 
-set "DIST=%CD%\python\dist"
-set "EXE_GUI=%DIST%\git-autosync.exe"
-set "EXE_SYNC=%DIST%\git-autosync-sync.exe"
-set "BINDIR=%USERPROFILE%\.git-autosync\bin"
-
-if not exist "%EXE_GUI%" (
-    echo Nao encontrei "%EXE_GUI%".
-    echo Peca pra alguem com Python gerar com: python\build_windows.ps1
-    goto :fim
-)
-if not exist "%EXE_SYNC%" (
-    echo Nao encontrei "%EXE_SYNC%".
-    echo Peca pra alguem com Python gerar com: python\build_windows.ps1
+set "PS1=%CD%\install-standalone.ps1"
+if not exist "%PS1%" (
+    echo Nao encontrei "%PS1%".
     goto :fim
 )
 
 echo === Instalador standalone Git AutoSync (sem Python) ===
 echo.
 
-if not exist "%BINDIR%" mkdir "%BINDIR%"
-copy /y "%EXE_GUI%" "%BINDIR%\git-autosync.exe" >nul
-copy /y "%EXE_SYNC%" "%BINDIR%\git-autosync-sync.exe" >nul
-echo Copiado para %BINDIR%
-echo.
+set "OPCOES="
 
 set "INSTALL_TASK=s"
 set /p INSTALL_TASK="Instalar tarefa agendada (commit+push automatico as 17:30)? (s/n) [s]: "
-if /i "%INSTALL_TASK%"=="s" (
-    schtasks /Create /TN "GitAutoSyncPy_0" /TR "\"%BINDIR%\git-autosync-sync.exe\"" /SC DAILY /ST 17:30 /F >nul
-    echo   Tarefa agendada instalada (17:30). Pra mudar o horario depois, use a GUI
-    echo   (aba Agendamento) ou "%BINDIR%\git-autosync.exe" set-schedule "HH:mm".
-)
-echo.
+if /i "!INSTALL_TASK!"=="s" set "OPCOES=!OPCOES! -TaskTime 17:30"
 
 set "ENABLE_TRAY=s"
 set /p ENABLE_TRAY="Habilitar icone na bandeja, iniciando com o login? (s/n) [s]: "
-if /i "%ENABLE_TRAY%"=="s" (
-    set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
-    (
-        echo @echo off
-        echo start "" "%BINDIR%\git-autosync.exe" --tray
-    ) > "%STARTUP%\GitAutoSyncTray.bat"
-    echo   Tray configurada para iniciar com o login.
-)
-echo.
+if /i "!ENABLE_TRAY!"=="s" set "OPCOES=!OPCOES! -EnableTray"
 
 set "SHORTCUT=s"
-set /p SHORTCUT="Criar atalho na area de trabalho? (s/n) [s]: "
-if /i "%SHORTCUT%"=="s" (
-    powershell -NoProfile -Command "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('%USERPROFILE%\Desktop\Git AutoSync.lnk'); $s.TargetPath='%BINDIR%\git-autosync.exe'; $s.WorkingDirectory='%BINDIR%'; $s.Save()"
-    echo   Atalho criado na area de trabalho.
+set /p SHORTCUT="Criar atalhos (area de trabalho e menu Iniciar)? (s/n) [s]: "
+if /i "!SHORTCUT!"=="s" set "OPCOES=!OPCOES! -Shortcut"
+
+set "SKILLS=s"
+set /p SKILLS="Instalar a skill do git-autosync para os agentes de IA? (s/n) [s]: "
+if /i "!SKILLS!"=="s" set "OPCOES=!OPCOES! -Skills"
+
+set "ADDPATH=n"
+set /p ADDPATH="Adicionar a pasta bin ao PATH do usuario? (s/n) [n]: "
+if /i "!ADDPATH!"=="s" set "OPCOES=!OPCOES! -AddToPath"
+
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" !OPCOES!
+if errorlevel 1 (
+    echo.
+    echo A instalacao falhou. Nada foi agendado.
+    goto :fim
 )
 
 echo.
 echo Instalacao concluida. Falta so adicionar seus repositorios:
-echo   "%BINDIR%\git-autosync.exe" add "<caminho do repo>" --type repo
-echo Ou abra a GUI direto: "%BINDIR%\git-autosync.exe"
+echo   "%USERPROFILE%\.git-autosync\bin\git-autosync.exe" add "<caminho do repo>" --type repo
+echo Ou abra a GUI direto: "%USERPROFILE%\.git-autosync\bin\git-autosync.exe"
 
 :fim
 pause

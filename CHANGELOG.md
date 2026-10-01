@@ -1,5 +1,51 @@
 # Changelog
 
+## 4.1.0
+
+- Instalador standalone reescrito: aceita `TaskTime`, `EnableTray`, `Shortcut`,
+  `Skills`, `AddToPath`, `Uninstall` e `Quiet`; não duplica tarefa agendada ao
+  reinstalar e falha com código de saída real. Agendamento e bandeja passam a
+  ser delegados ao próprio binário, que valida horário e faz rollback.
+- `--version`/`--help` do executável da rodada agendada saem sem tocar em
+  repositório nenhum; qualquer outro argumento desconhecido recusa rodar em vez
+  de disparar sincronização completa (bug que chegou a gerar commits reais em
+  repositórios não pretendidos durante testes do instalador).
+- Saída do CLI em UTF-8 mesmo empacotado pelo PyInstaller — evita estouro ao
+  exibir emoji em `status --json`; abertura da bandeja corrige falha de
+  validação de segurança herdada do processo onefile.
+- Instalador compila em PowerShell 5.1 (Windows) sem depender de caracteres
+  fora de ASCII, espera corretamente o binário de janela (sem console) e o
+  processo da bandeja antes de ler o código de saída real.
+- Tema claro/escuro e hierarquia visual da interface unificados por constantes
+  semânticas de cor, aplicadas de forma consistente nos dois temas.
+
+## 4.0.0
+
+- Resultados agora distinguem sincronização completa de `pending_push`; remoto
+  indisponível ou push falho retorna erro, preserva commit local e é tentado
+  novamente mesmo sem novas alterações.
+- Stage do usuário preservado por índice Git privado. Prévia cancelada, hook
+  rejeitado ou conteúdo alterado após revisão não destroem staging existente.
+- Locks entre processos por repositório e por estado impedem rodadas
+  concorrentes. Configuração/status usam escrita atômica e merge com detecção de
+  snapshots obsoletos; logs têm rotação e redação de segredos.
+- Preflight bloqueia conflitos, operações Git em andamento, HEAD destacado,
+  branch fora da política, arquivos sensíveis e arquivos acima do limite.
+- IA passa a ser opt-in: `set-ai on|off`. `set-policy` controla branches,
+  include/exclude, tamanho máximo e IA por repositório. Diff enviado não usa
+  filtros externos e tem limite de 12.000 caracteres.
+- Novo `doctor [--network]` valida Git, configuração, repositórios, remotos e
+  instalação do agendamento. CLI e execução agendada retornam código de erro em
+  falhas reais; GUI também exibe operações individuais/em lote incompletas.
+- Tokens GitLab vinculados ao host ficam em DPAPI no Windows ou Secret Service
+  no Linux. Variáveis de ambiente exigem token e host autorizado; token legado
+  em texto puro é recusado.
+- Agendamento validado, com rollback da definição anterior se atualização
+  falhar. Processos recebem timeout real e execução não interativa.
+- Instalador Python cria release imutável identificada por versão + hash em
+  `~/.git-autosync/releases`; CLI, GUI, tray e agendamento usam essa cópia.
+- CI executa suíte de integração em Windows/Linux com Python 3.9 e 3.12.
+
 ## 3.10.0
 
 - **Escolha do agente de IA** que gera a mensagem de commit — Claude, Codex
