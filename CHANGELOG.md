@@ -1,5 +1,24 @@
 # Changelog
 
+## 4.1.0
+
+- Instalador standalone reescrito: aceita `TaskTime`, `EnableTray`, `Shortcut`,
+  `Skills`, `AddToPath`, `Uninstall` e `Quiet`; não duplica tarefa agendada ao
+  reinstalar e falha com código de saída real. Agendamento e bandeja passam a
+  ser delegados ao próprio binário, que valida horário e faz rollback.
+- `--version`/`--help` do executável da rodada agendada saem sem tocar em
+  repositório nenhum; qualquer outro argumento desconhecido recusa rodar em vez
+  de disparar sincronização completa (bug que chegou a gerar commits reais em
+  repositórios não pretendidos durante testes do instalador).
+- Saída do CLI em UTF-8 mesmo empacotado pelo PyInstaller — evita estouro ao
+  exibir emoji em `status --json`; abertura da bandeja corrige falha de
+  validação de segurança herdada do processo onefile.
+- Instalador compila em PowerShell 5.1 (Windows) sem depender de caracteres
+  fora de ASCII, espera corretamente o binário de janela (sem console) e o
+  processo da bandeja antes de ler o código de saída real.
+- Tema claro/escuro e hierarquia visual da interface unificados por constantes
+  semânticas de cor, aplicadas de forma consistente nos dois temas.
+
 ## 4.0.0
 
 - Resultados agora distinguem sincronização completa de `pending_push`; remoto
